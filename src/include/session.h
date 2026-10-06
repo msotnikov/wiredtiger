@@ -11,13 +11,14 @@
 /*
  * WT_DATA_HANDLE_CACHE --
  *	Per-session cache of handles to avoid synchronization when opening
- *	cursors.
+ *	cursors. The session keeps the entries in a list, most recently
+ *	found first, without a hash table.
  */
 struct __wt_data_handle_cache {
     WT_DATA_HANDLE *dhandle;
+    uint64_t name_hash; /* Copy of the handle's name hash, read while walking the list */
 
     TAILQ_ENTRY(__wt_data_handle_cache) q;
-    TAILQ_ENTRY(__wt_data_handle_cache) hashq;
 };
 
 /*
@@ -373,9 +374,6 @@ struct __wt_session_impl {
      * growing too large.
      */
     WT_CURSOR_LIST *cursor_cache; /* Hash table of cached cursors */
-
-    /* Hashed handle reference list array */
-    TAILQ_HEAD(__dhandles_hash, __wt_data_handle_cache) * dhhash;
 
 /* Generations manager */
 #define WT_GEN_CHECKPOINT 0        /* Checkpoint generation */

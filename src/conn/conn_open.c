@@ -198,7 +198,6 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
         if ((s = WT_CONN_SESSIONS_GET(conn)) != NULL)
             for (i = 0; i < conn->session_array.size; ++s, ++i) {
                 __wt_free(session, s->cursor_cache);
-                __wt_free(session, s->dhhash);
                 __wt_stash_discard_all(session, s);
                 __wt_free(session, s->hazards.arr);
             }

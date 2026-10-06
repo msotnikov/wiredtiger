@@ -100,16 +100,14 @@ static int
 __session_add_dhandle(WT_SESSION_IMPL *session)
 {
     WT_DATA_HANDLE_CACHE *dhandle_cache;
-    uint64_t bucket;
 
     /* Allocate a handle cache entry. */
     WT_RET(__wt_calloc_one(session, &dhandle_cache));
 
     dhandle_cache->dhandle = session->dhandle;
+    dhandle_cache->name_hash = session->dhandle->name_hash;
 
-    bucket = dhandle_cache->dhandle->name_hash & (S2C(session)->dh_hash_size - 1);
     TAILQ_INSERT_HEAD(&session->dhandles, dhandle_cache, q);
-    TAILQ_INSERT_HEAD(&session->dhhash[bucket], dhandle_cache, hashq);
 
     return (0);
 }
@@ -121,11 +119,7 @@ __session_add_dhandle(WT_SESSION_IMPL *session)
 static void
 __session_discard_dhandle(WT_SESSION_IMPL *session, WT_DATA_HANDLE_CACHE *dhandle_cache)
 {
-    uint64_t bucket;
-
-    bucket = dhandle_cache->dhandle->name_hash & (S2C(session)->dh_hash_size - 1);
     TAILQ_REMOVE(&session->dhandles, dhandle_cache, q);
-    TAILQ_REMOVE(&session->dhhash[bucket], dhandle_cache, hashq);
 
     WT_DHANDLE_RELEASE(dhandle_cache->dhandle);
     __wt_overwrite_and_free(session, dhandle_cache);
@@ -133,7 +127,9 @@ __session_discard_dhandle(WT_SESSION_IMPL *session, WT_DATA_HANDLE_CACHE *dhandl
 
 /*
  * __session_find_dhandle --
- *     Search for a data handle in the session cache.
+ *     Search for a data handle in the session cache. The list is walked comparing the name hash
+ *     first; a found entry moves to the head of the list, so handles a session uses often are found
+ *     after a few entries.
  */
 static void
 __session_find_dhandle(WT_SESSION_IMPL *session, const char *uri, const char *checkpoint,
@@ -141,13 +137,15 @@ __session_find_dhandle(WT_SESSION_IMPL *session, const char *uri, const char *ch
 {
     WT_DATA_HANDLE *dhandle;
     WT_DATA_HANDLE_CACHE *dhandle_cache;
-    uint64_t bucket;
+    uint64_t hash;
 
     dhandle = NULL;
 
-    bucket = __wt_hash_city64(uri, strlen(uri)) & (S2C(session)->dh_hash_size - 1);
+    hash = __wt_hash_city64(uri, strlen(uri));
 retry:
-    TAILQ_FOREACH (dhandle_cache, &session->dhhash[bucket], hashq) {
+    TAILQ_FOREACH (dhandle_cache, &session->dhandles, q) {
+        if (dhandle_cache->name_hash != hash)
+            continue;
         dhandle = dhandle_cache->dhandle;
         if ((WT_DHANDLE_INACTIVE(dhandle) || __wt_atomic_load_bool_relaxed(&dhandle->outdated)) &&
           !WT_IS_METADATA(dhandle)) {
@@ -163,6 +161,11 @@ retry:
         if (checkpoint != NULL && dhandle->checkpoint != NULL &&
           strcmp(checkpoint, dhandle->checkpoint) == 0)
             break;
+    }
+
+    if (dhandle_cache != NULL && dhandle_cache != TAILQ_FIRST(&session->dhandles)) {
+        TAILQ_REMOVE(&session->dhandles, dhandle_cache, q);
+        TAILQ_INSERT_HEAD(&session->dhandles, dhandle_cache, q);
     }
 
     *dhandle_cachep = dhandle_cache;

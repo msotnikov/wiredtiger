@@ -1457,9 +1457,9 @@ wiredtiger_open_common =\
             configure the number of hash buckets for hash arrays relating to data handles''',
             min='64', max='65536'),
         Config('session_dhandle_buckets', 0, r'''
-            configure the number of hash buckets for each session's cache of data handles. Every
-            session allocates its own array, the connection allocates one array of
-            \c dhandle_buckets. A value of 0 uses \c dhandle_buckets''',
+            configure the number of hash buckets for each session's cache of data handles: 0, or a
+            power of two of at least 64. Every session allocates its own array, the connection
+            allocates one array of \c dhandle_buckets. A value of 0 uses \c dhandle_buckets''',
             min='0', max='65536'),
         ]),
     Config('hazard_max', '1000', r'''

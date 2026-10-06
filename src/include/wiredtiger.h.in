@@ -3373,9 +3373,10 @@ struct __wt_connection {
  * number of hash buckets for hash arrays relating to data handles., an integer between \c 64 and \c
  * 65536; default \c 512.}
  * @config{&nbsp;&nbsp;&nbsp;&nbsp;session_dhandle_buckets, configure the
- * number of hash buckets for each session's cache of data handles.  Every session allocates its own
- * array\, the connection allocates one array of \c dhandle_buckets.  A value of 0 uses \c
- * dhandle_buckets., an integer between \c 0 and \c 65536; default \c 0.}
+ * number of hash buckets for each session's cache of data handles: 0\, or a power of two of at
+ * least 64. Every session allocates its own array\, the connection allocates one array of \c
+ * dhandle_buckets.  A value of 0 uses \c dhandle_buckets., an integer between \c 0 and \c 65536;
+ * default \c 0.}
  * @config{ ),,}
  * @config{heuristic_controls = (, control the behavior of various optimizations.  This is primarily
  * used as a mechanism for rolling out changes to internal heuristics while providing a mechanism

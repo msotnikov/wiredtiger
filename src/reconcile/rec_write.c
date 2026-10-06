@@ -642,6 +642,7 @@ __rec_write_page_status(WT_SESSION_IMPL *session, WTI_RECONCILE *r)
          */
         btree->modified = true;
         WT_FULL_BARRIER();
+        __wt_checkpoint_tree_modified(session, btree);
         if (!S2C(session)->modified)
             S2C(session)->modified = true;
 

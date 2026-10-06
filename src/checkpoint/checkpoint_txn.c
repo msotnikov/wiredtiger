@@ -147,6 +147,88 @@ __wt_checkpoint_update_generation(WT_SESSION_IMPL *session, WT_BTREE *btree)
 }
 
 /*
+ * __checkpoint_gather_ignores --
+ *     Return true for trees the handle gather returns from before any checkpoint work.
+ */
+static WT_INLINE bool
+__checkpoint_gather_ignores(WT_BTREE *btree)
+{
+    return (F_ISSET(btree, WT_BTREE_IN_MEMORY) || F_ISSET_ATOMIC_32(btree, WT_BTREE_READONLY) ||
+      F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH) || WT_IS_HS(btree->dhandle));
+}
+
+/*
+ * __wt_checkpoint_bucket_set --
+ *     Flag the data handle hash bucket of a tree: the next checkpoint gather walks it.
+ */
+void
+__wt_checkpoint_bucket_set(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle)
+{
+    WT_CONNECTION_IMPL *conn;
+    uint64_t bucket;
+
+    conn = S2C(session);
+    bucket = dhandle->name_hash & (conn->dh_hash_size - 1);
+
+    /* Test before setting, the flag is shared by every tree in the bucket. */
+    if (!__wt_atomic_load_bool_relaxed(&conn->dh_bucket_ckpt[bucket]))
+        __wt_atomic_store_bool_relaxed(&conn->dh_bucket_ckpt[bucket], true);
+}
+
+/*
+ * __wt_checkpoint_bucket_keep --
+ *     Return true if a tree the gather has just visited may need work from a later checkpoint, so
+ *     its bucket stays flagged: the tree is modified, or in exclusive or special use, or has a
+ *     clean checkpoint timer other than forever (zero after the tree went through the usual path,
+ *     or a time to recheck its checkpoints). A clean tree with the timer set forever needs no visit
+ *     until it is modified or reopened, and both flag the bucket again.
+ */
+bool
+__wt_checkpoint_bucket_keep(WT_DATA_HANDLE *dhandle)
+{
+    WT_BTREE *btree;
+
+    if (F_ISSET(dhandle, WT_DHANDLE_EXCLUSIVE))
+        return (true);
+
+    btree = dhandle->handle;
+    if (F_ISSET(btree, WT_BTREE_SPECIAL_FLAGS))
+        return (true);
+    if (__checkpoint_gather_ignores(btree))
+        return (false);
+    if (__wt_atomic_load_bool_acquire(&btree->modified))
+        return (true);
+    return (btree->clean_ckpt_timer != WT_BTREE_CLEAN_CKPT_FOREVER);
+}
+
+/*
+ * __wt_checkpoint_tree_modified --
+ *     A tree went from clean to modified: flag its bucket for the next checkpoint gather. The
+ *     caller has set the tree's modified flag and issued a full barrier, so a gather that clears
+ *     the flag concurrently and then reads the tree's modified flag sees it set.
+ *
+ *     If the running checkpoint has finished a bucket gather that did not visit the tree, the tree
+ *     is not part of that checkpoint: update its checkpoint generation, as the full walk does for a
+ *     clean tree it skips, so eviction in the tree is not bound by the checkpoint snapshot.
+ */
+void
+__wt_checkpoint_tree_modified(WT_SESSION_IMPL *session, WT_BTREE *btree)
+{
+    uint64_t gen;
+
+    __wt_checkpoint_bucket_set(session, btree->dhandle);
+
+    if (WT_IS_ANY_METADATA(btree->dhandle) || __checkpoint_gather_ignores(btree))
+        return;
+
+    gen = __wt_gen(session, WT_GEN_CHECKPOINT);
+    if (__wt_atomic_load_uint64_acquire(&S2C(session)->ckpt.gather_bucket_gen) == gen &&
+      __wt_atomic_load_uint64_relaxed(&btree->ckpt_gather_gen) != gen &&
+      __wt_atomic_load_uint64_acquire(&btree->checkpoint_gen) < gen)
+        __wt_checkpoint_update_generation(session, btree);
+}
+
+/*
  * __checkpoint_apply_operation --
  *     Apply a preliminary operation to all files involved in a checkpoint.
  */
@@ -910,6 +992,8 @@ __checkpoint_fail_reset(WT_SESSION_IMPL *session)
 
     btree = S2BT(session);
     btree->modified = true;
+    WT_FULL_BARRIER();
+    __wt_checkpoint_tree_modified(session, btree);
 
     /* Revert the in-memory root page accounting as we have failed during checkpointing. */
     __wt_block_disagg_checkpoint_rollback(session);
@@ -1193,8 +1277,14 @@ __checkpoint_prepare(WT_SESSION_IMPL *session, bool *trackingp, WT_CHECKPOINT_DB
      * handles.
      */
     WT_ASSERT(session, session->ckpt.handle_next == 0);
+    session->ckpt.gather_buckets =
+      !ckpt_cfg->force && !ckpt_cfg->named && !ckpt_cfg->drop && !__wt_conn_is_disagg(session);
     WT_WITH_TABLE_READ_LOCK(
       session, ret = __checkpoint_apply_operation(session, ckpt_cfg, __wt_checkpoint_get_handles));
+    if (ret == 0 && session->ckpt.gather_buckets)
+        __wt_atomic_store_uint64_release(
+          &conn->ckpt.gather_bucket_gen, __wt_gen(session, WT_GEN_CHECKPOINT));
+    session->ckpt.gather_buckets = false;
 
     __wt_epoch(session, &conn->ckpt.prepare.timer_end);
     WT_STAT_CONN_SET(session, checkpoint_prep_running, 0);
@@ -3253,6 +3343,8 @@ err:
      */
     if (ret != 0) {
         btree->modified = true;
+        WT_FULL_BARRIER();
+        __wt_checkpoint_tree_modified(session, btree);
         conn->modified = true;
     }
 

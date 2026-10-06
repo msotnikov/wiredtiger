@@ -723,6 +723,11 @@ __wt_conn_dhandle_open(WT_SESSION_IMPL *session, const char *cfg[], uint32_t fla
     if (dhandle->checkpoint == NULL)
         __wt_atomic_add_uint32(&S2C(session)->open_btree_count, 1);
 
+    /* An opened tree has a zero clean checkpoint timer: the next checkpoint gather must visit it.
+     */
+    if (WT_DHANDLE_BTREE(dhandle) && dhandle->checkpoint == NULL)
+        __wt_checkpoint_bucket_set(session, dhandle);
+
     if (0) {
 err:
         if (btree != NULL)
@@ -783,6 +788,73 @@ __conn_btree_apply_internal(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle,
 }
 
 /*
+ * __conn_btree_apply_skip --
+ *     Return true if a handle walk without a URI skips the handle.
+ */
+static WT_INLINE bool
+__conn_btree_apply_skip(WT_DATA_HANDLE *dhandle)
+{
+    return (!F_ISSET(dhandle, WT_DHANDLE_OPEN) || F_ISSET(dhandle, WT_DHANDLE_DEAD) ||
+      __wt_atomic_load_bool_relaxed(&dhandle->outdated) || !WT_DHANDLE_BTREE(dhandle) ||
+      dhandle->checkpoint != NULL || WT_IS_ANY_METADATA(dhandle));
+}
+
+/*
+ * __conn_btree_apply_buckets --
+ *     Checkpoint handle gather that walks only the flagged data handle hash buckets. A bucket's
+ *     flag is cleared before its handles are read and set again if any tree in it may need work
+ *     from a later checkpoint. A tree that goes from clean to modified sets its tree flag, issues a
+ *     full barrier and then sets the bucket flag, so either the gather reads the tree as modified
+ *     or the bucket stays flagged for the next checkpoint. The checkpoint transaction's snapshot is
+ *     taken before the gather, so every update the checkpoint must include flagged its bucket
+ *     before the walk starts.
+ */
+static int
+__conn_btree_apply_buckets(WT_SESSION_IMPL *session,
+  int (*file_func)(WT_SESSION_IMPL *, const char *[]), const char *cfg[], uint64_t *walkedp)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_DATA_HANDLE *dhandle;
+    WT_DECL_RET;
+    uint64_t bucket, gen;
+    bool keep;
+
+    conn = S2C(session);
+    gen = __wt_gen(session, WT_GEN_CHECKPOINT);
+    *walkedp = 0;
+
+    for (bucket = 0; bucket < conn->dh_hash_size; ++bucket) {
+        if (!__wt_atomic_load_bool_relaxed(&conn->dh_bucket_ckpt[bucket]))
+            continue;
+        __wt_atomic_store_bool_relaxed(&conn->dh_bucket_ckpt[bucket], false);
+        WT_FULL_BARRIER();
+
+        keep = false;
+        for (dhandle = NULL;;) {
+            WT_WITH_HANDLE_LIST_READ_LOCK(
+              session, WT_DHANDLE_NEXT(session, dhandle, &conn->dhhash[bucket], hashq));
+            if (dhandle == NULL)
+                break;
+            if (__conn_btree_apply_skip(dhandle))
+                continue;
+
+            ++*walkedp;
+            __wt_atomic_store_uint64_relaxed(&((WT_BTREE *)dhandle->handle)->ckpt_gather_gen, gen);
+            if ((ret = __conn_btree_apply_internal(session, dhandle, file_func, NULL, cfg)) != 0) {
+                __wt_atomic_store_bool_relaxed(&conn->dh_bucket_ckpt[bucket], true);
+                WT_DHANDLE_RELEASE(dhandle);
+                return (ret);
+            }
+            if (!keep && __wt_checkpoint_bucket_keep(dhandle))
+                keep = true;
+        }
+        if (keep)
+            __wt_atomic_store_bool_relaxed(&conn->dh_bucket_ckpt[bucket], true);
+    }
+    return (0);
+}
+
+/*
  * __wt_conn_btree_apply --
  *     Apply a function to all open btree handles with the given URI.
  */
@@ -794,7 +866,8 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
     WT_CONNECTION_IMPL *conn;
     WT_DATA_HANDLE *dhandle;
     WT_DECL_RET;
-    uint64_t bucket, time_diff, time_start, time_stop;
+    uint64_t bucket, time_diff, time_start, time_stop, walked;
+    bool ckpt_gather;
 
     conn = S2C(session);
     /*
@@ -818,10 +891,20 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
         }
     } else {
         time_start = 0;
+        walked = conn->dhandle_count;
         if (WT_SESSION_IS_CHECKPOINT(session)) {
             time_start = __wt_clock(session);
             __wt_checkpoint_handle_stats_clear(session);
             F_SET_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
+        }
+        ckpt_gather = WT_SESSION_IS_CHECKPOINT(session) &&
+          file_func == __wt_checkpoint_get_handles && name_func == NULL;
+        if (ckpt_gather && session->ckpt.gather_buckets) {
+            if ((ret = __conn_btree_apply_buckets(session, file_func, cfg, &walked)) != 0) {
+                F_CLR_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
+                return (ret);
+            }
+            goto done;
         }
         /*
          * Walk backwards. The sweep server walks this list forwards, write-locking each handle
@@ -835,12 +918,14 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
             if (dhandle == NULL)
                 goto done;
 
-            if (!F_ISSET(dhandle, WT_DHANDLE_OPEN) || F_ISSET(dhandle, WT_DHANDLE_DEAD) ||
-              __wt_atomic_load_bool_relaxed(&dhandle->outdated) || !WT_DHANDLE_BTREE(dhandle) ||
-              dhandle->checkpoint != NULL || WT_IS_ANY_METADATA(dhandle))
+            if (__conn_btree_apply_skip(dhandle))
                 continue;
 
             WT_ERR(__conn_btree_apply_internal(session, dhandle, file_func, name_func, cfg));
+
+            /* A full checkpoint gather leaves the bucket flags a superset of the trees to visit. */
+            if (ckpt_gather && __wt_checkpoint_bucket_keep(dhandle))
+                __wt_checkpoint_bucket_set(session, dhandle);
         }
 done:
         if (time_start != 0) {
@@ -848,7 +933,7 @@ done:
             time_stop = __wt_clock(session);
             time_diff = WT_CLOCKDIFF_US(time_stop, time_start);
             __wt_checkpoint_handle_stats(session, time_diff);
-            WT_STAT_CONN_SET(session, checkpoint_handle_walked, conn->dhandle_count);
+            WT_STAT_CONN_SET(session, checkpoint_handle_walked, walked);
         }
         return (0);
     }

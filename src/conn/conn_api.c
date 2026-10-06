@@ -1889,6 +1889,16 @@ __conn_hash_config(WT_SESSION_IMPL *session, const char *cfg[])
           "Data handle hash bucket size %" PRIu64 " invalid. Must be power of 2",
           (uint64_t)cval.val);
     conn->dh_hash_size = (uint64_t)cval.val;
+    WT_RET(__wt_config_gets(session, cfg, "hash.session_dhandle_buckets", &cval));
+    if (cval.val == 0)
+        conn->dh_session_hash_size = conn->dh_hash_size;
+    else if (cval.val < 64 || !__wt_ispo2((uint32_t)cval.val))
+        WT_RET_MSG(session, EINVAL,
+          "Session data handle hash bucket size %" PRIu64
+          " invalid. Must be 0 or a power of 2 of at least 64",
+          (uint64_t)cval.val);
+    else
+        conn->dh_session_hash_size = (uint64_t)cval.val;
     /* Don't set the values in the statistics here. They're set after the connection is set up. */
 
     /* Hash bucket arrays. */
@@ -1900,8 +1910,11 @@ __conn_hash_config(WT_SESSION_IMPL *session, const char *cfg[])
     }
     WT_RET(__wt_calloc_def(session, conn->dh_hash_size, &conn->dh_bucket_count));
     WT_RET(__wt_calloc_def(session, conn->dh_hash_size, &conn->dhhash));
-    for (i = 0; i < conn->dh_hash_size; ++i)
+    WT_RET(__wt_calloc_def(session, conn->dh_hash_size, &conn->dh_bucket_ckpt));
+    for (i = 0; i < conn->dh_hash_size; ++i) {
         TAILQ_INIT(&conn->dhhash[i]);
+        conn->dh_bucket_ckpt[i] = true;
+    }
 
     return (0);
 }

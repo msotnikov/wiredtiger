@@ -2698,10 +2698,10 @@ __open_session(WT_CONNECTION_IMPL *conn, WT_EVENT_HANDLER *event_handler, const 
     if (session_ret->cursor_cache == NULL)
         WT_ERR(__wt_calloc_def(session, conn->hash_size, &session_ret->cursor_cache));
     if (session_ret->dhhash == NULL)
-        WT_ERR(__wt_calloc_def(session, conn->dh_hash_size, &session_ret->dhhash));
+        WT_ERR(__wt_calloc_def(session, conn->dh_session_hash_size, &session_ret->dhhash));
 
     /* Initialize the dhandle hash array. */
-    for (i = 0; i < (uint32_t)conn->dh_hash_size; i++)
+    for (i = 0; i < (uint32_t)conn->dh_session_hash_size; i++)
         TAILQ_INIT(&session_ret->dhhash[i]);
 
     /* Initialize the cursor cache hash buckets and sweep trigger. */

@@ -1150,6 +1150,7 @@ __wt_tree_modify_set(WT_SESSION_IMPL *session)
         }
         btree->modified = true;
         WT_FULL_BARRIER();
+        __wt_checkpoint_tree_modified(session, btree);
 
         /*
          * There is a potential race where checkpoint walks the tree and marks it as clean before a

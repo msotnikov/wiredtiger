@@ -978,6 +978,9 @@ struct __wt_connection_impl {
     uint64_t hash_size;       /* General hash bucket array size */
     int is_new;               /* Connection created database */
 
+    /* Session data handle hash bucket array size */
+    uint64_t dh_session_hash_size;
+
     WT_VERSION recovery_version; /* Version of the database being recovered */
 
 #ifndef WT_STANDALONE_BUILD
@@ -1037,6 +1040,12 @@ struct __wt_connection_impl {
 
     WT_BLKCACHE blkcache;             /* Block cache */
     WT_CHECKPOINT_CLEANUP cc_cleanup; /* Checkpoint cleanup */
+
+    /*
+     * A flag per data handle hash bucket, set when a tree in the bucket may need work from the next
+     * checkpoint. The checkpoint handle gather walks only the flagged buckets.
+     */
+    wt_shared bool *dh_bucket_ckpt;
 
     uint64_t *dh_bucket_count;                   /* Locked: handles in each bucket */
     wt_shared uint64_t dhandle_count;            /* Locked: handles in the queue */

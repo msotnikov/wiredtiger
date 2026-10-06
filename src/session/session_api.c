@@ -2690,19 +2690,17 @@ __open_session(WT_CONNECTION_IMPL *conn, WT_EVENT_HANDLER *event_handler, const 
 
     TAILQ_INIT(&session_ret->cursors);
     TAILQ_INIT(&session_ret->dhandles);
+    session_ret->dhandle_cache_count = 0;
 
     /*
-     * If we don't have them, allocate the cursor and dhandle hash arrays. Allocate the table hash
-     * array as well.
+     * If we don't have it, allocate the cursor hash array. The dhandle hash array is allocated when
+     * the session caches enough handles; a previous session in this slot may have left one.
      */
     if (session_ret->cursor_cache == NULL)
         WT_ERR(__wt_calloc_def(session, conn->hash_size, &session_ret->cursor_cache));
-    if (session_ret->dhhash == NULL)
-        WT_ERR(__wt_calloc_def(session, conn->dh_session_hash_size, &session_ret->dhhash));
-
-    /* Initialize the dhandle hash array. */
-    for (i = 0; i < (uint32_t)conn->dh_session_hash_size; i++)
-        TAILQ_INIT(&session_ret->dhhash[i]);
+    if (session_ret->dhhash != NULL)
+        for (i = 0; i < (uint32_t)conn->dh_session_hash_size; i++)
+            TAILQ_INIT(&session_ret->dhhash[i]);
 
     /* Initialize the cursor cache hash buckets and sweep trigger. */
     for (i = 0; i < (uint32_t)conn->hash_size; i++)

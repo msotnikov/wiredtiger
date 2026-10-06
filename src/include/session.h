@@ -374,8 +374,14 @@ struct __wt_session_impl {
      */
     WT_CURSOR_LIST *cursor_cache; /* Hash table of cached cursors */
 
-    /* Hashed handle reference list array */
+    /*
+     * Hashed handle reference list array. A session searches its handle list until it caches more
+     * than WT_SESSION_DHANDLE_HASH_MIN handles, then allocates the array and keeps it for the
+     * session slot.
+     */
+#define WT_SESSION_DHANDLE_HASH_MIN 64
     TAILQ_HEAD(__dhandles_hash, __wt_data_handle_cache) * dhhash;
+    u_int dhandle_cache_count; /* Handles in the session's handle list */
 
 /* Generations manager */
 #define WT_GEN_CHECKPOINT 0        /* Checkpoint generation */

@@ -93,6 +93,28 @@ __wt_session_dhandle_try_writelock(WT_SESSION_IMPL *session)
 }
 
 /*
+ * __session_dhandle_hash_alloc --
+ *     Allocate the session's data handle hash array and hash the cached handles into it.
+ */
+static int
+__session_dhandle_hash_alloc(WT_SESSION_IMPL *session)
+{
+    WT_DATA_HANDLE_CACHE *dhandle_cache;
+    uint64_t bucket, i, size;
+
+    size = S2C(session)->dh_session_hash_size;
+    WT_RET(__wt_calloc_def(session, size, &session->dhhash));
+    for (i = 0; i < size; ++i)
+        TAILQ_INIT(&session->dhhash[i]);
+
+    TAILQ_FOREACH (dhandle_cache, &session->dhandles, q) {
+        bucket = dhandle_cache->dhandle->name_hash & (size - 1);
+        TAILQ_INSERT_HEAD(&session->dhhash[bucket], dhandle_cache, hashq);
+    }
+    return (0);
+}
+
+/*
  * __session_add_dhandle --
  *     Add a handle to the session's cache.
  */
@@ -107,9 +129,15 @@ __session_add_dhandle(WT_SESSION_IMPL *session)
 
     dhandle_cache->dhandle = session->dhandle;
 
-    bucket = dhandle_cache->dhandle->name_hash & (S2C(session)->dh_session_hash_size - 1);
     TAILQ_INSERT_HEAD(&session->dhandles, dhandle_cache, q);
-    TAILQ_INSERT_HEAD(&session->dhhash[bucket], dhandle_cache, hashq);
+    ++session->dhandle_cache_count;
+
+    if (session->dhhash != NULL) {
+        bucket = dhandle_cache->dhandle->name_hash & (S2C(session)->dh_session_hash_size - 1);
+        TAILQ_INSERT_HEAD(&session->dhhash[bucket], dhandle_cache, hashq);
+    } else if (session->dhandle_cache_count > WT_SESSION_DHANDLE_HASH_MIN)
+        /* Without the array the session keeps searching its handle list. */
+        WT_IGNORE_RET(__session_dhandle_hash_alloc(session));
 
     return (0);
 }
@@ -123,9 +151,12 @@ __session_discard_dhandle(WT_SESSION_IMPL *session, WT_DATA_HANDLE_CACHE *dhandl
 {
     uint64_t bucket;
 
-    bucket = dhandle_cache->dhandle->name_hash & (S2C(session)->dh_session_hash_size - 1);
     TAILQ_REMOVE(&session->dhandles, dhandle_cache, q);
-    TAILQ_REMOVE(&session->dhhash[bucket], dhandle_cache, hashq);
+    --session->dhandle_cache_count;
+    if (session->dhhash != NULL) {
+        bucket = dhandle_cache->dhandle->name_hash & (S2C(session)->dh_session_hash_size - 1);
+        TAILQ_REMOVE(&session->dhhash[bucket], dhandle_cache, hashq);
+    }
 
     WT_DHANDLE_RELEASE(dhandle_cache->dhandle);
     __wt_overwrite_and_free(session, dhandle_cache);
@@ -133,7 +164,8 @@ __session_discard_dhandle(WT_SESSION_IMPL *session, WT_DATA_HANDLE_CACHE *dhandl
 
 /*
  * __session_find_dhandle --
- *     Search for a data handle in the session cache.
+ *     Search for a data handle in the session cache: the hash array bucket if the session has the
+ *     array, otherwise the session's handle list.
  */
 static void
 __session_find_dhandle(WT_SESSION_IMPL *session, const char *uri, const char *checkpoint,
@@ -141,13 +173,18 @@ __session_find_dhandle(WT_SESSION_IMPL *session, const char *uri, const char *ch
 {
     WT_DATA_HANDLE *dhandle;
     WT_DATA_HANDLE_CACHE *dhandle_cache;
-    uint64_t bucket;
+    uint64_t hash;
 
     dhandle = NULL;
 
-    bucket = __wt_hash_city64(uri, strlen(uri)) & (S2C(session)->dh_session_hash_size - 1);
+    hash = __wt_hash_city64(uri, strlen(uri));
 retry:
-    TAILQ_FOREACH (dhandle_cache, &session->dhhash[bucket], hashq) {
+    for (dhandle_cache = session->dhhash == NULL ?
+        TAILQ_FIRST(&session->dhandles) :
+        TAILQ_FIRST(&session->dhhash[hash & (S2C(session)->dh_session_hash_size - 1)]);
+      dhandle_cache != NULL;
+      dhandle_cache = session->dhhash == NULL ? TAILQ_NEXT(dhandle_cache, q) :
+                                                TAILQ_NEXT(dhandle_cache, hashq)) {
         dhandle = dhandle_cache->dhandle;
         if ((WT_DHANDLE_INACTIVE(dhandle) || __wt_atomic_load_bool_relaxed(&dhandle->outdated)) &&
           !WT_IS_METADATA(dhandle)) {
@@ -156,7 +193,7 @@ retry:
             goto retry;
         }
 
-        if (strcmp(uri, dhandle->name) != 0)
+        if (dhandle->name_hash != hash || strcmp(uri, dhandle->name) != 0)
             continue;
         if (checkpoint == NULL && dhandle->checkpoint == NULL)
             break;

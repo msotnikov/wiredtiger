@@ -978,6 +978,9 @@ struct __wt_connection_impl {
     uint64_t hash_size;       /* General hash bucket array size */
     int is_new;               /* Connection created database */
 
+    /* Session data handle hash bucket array size */
+    uint64_t dh_session_hash_size;
+
     WT_VERSION recovery_version; /* Version of the database being recovered */
 
 #ifndef WT_STANDALONE_BUILD

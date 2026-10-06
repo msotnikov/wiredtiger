@@ -49,7 +49,7 @@
 #define WT_CONF_ID_Shared_cache 311ULL
 #define WT_CONF_ID_Statistics_log 315ULL
 #define WT_CONF_ID_Tiered_storage 112ULL
-#define WT_CONF_ID_Transaction_sync 375ULL
+#define WT_CONF_ID_Transaction_sync 376ULL
 #define WT_CONF_ID_access_pattern_hint 12ULL
 #define WT_CONF_ID_action 79ULL
 #define WT_CONF_ID_after_drop_colgroup 228ULL
@@ -61,7 +61,7 @@
 #define WT_CONF_ID_archive 295ULL
 #define WT_CONF_ID_auth_token 113ULL
 #define WT_CONF_ID_auto_throttle 97ULL
-#define WT_CONF_ID_available 367ULL
+#define WT_CONF_ID_available 368ULL
 #define WT_CONF_ID_background 83ULL
 #define WT_CONF_ID_background_compact 224ULL
 #define WT_CONF_ID_backup 191ULL
@@ -132,7 +132,7 @@
 #define WT_CONF_ID_commit_timestamp 2ULL
 #define WT_CONF_ID_compare_timestamp 91ULL
 #define WT_CONF_ID_compile_configuration_count 347ULL
-#define WT_CONF_ID_compressor 360ULL
+#define WT_CONF_ID_compressor 361ULL
 #define WT_CONF_ID_config 321ULL
 #define WT_CONF_ID_config_base 348ULL
 #define WT_CONF_ID_configuration 232ULL
@@ -145,7 +145,7 @@
 #define WT_CONF_ID_cursor_reposition 234ULL
 #define WT_CONF_ID_cursors 194ULL
 #define WT_CONF_ID_database_size_fix 186ULL
-#define WT_CONF_ID_default 368ULL
+#define WT_CONF_ID_default 369ULL
 #define WT_CONF_ID_delete_pct 307ULL
 #define WT_CONF_ID_delta_pct 304ULL
 #define WT_CONF_ID_dhandle_buckets 357ULL
@@ -205,7 +205,7 @@
 #define WT_CONF_ID_flushed_data_cache_insertion 344ULL
 #define WT_CONF_ID_force 121ULL
 #define WT_CONF_ID_force_stop 142ULL
-#define WT_CONF_ID_force_write_wait 361ULL
+#define WT_CONF_ID_force_write_wait 362ULL
 #define WT_CONF_ID_format 26ULL
 #define WT_CONF_ID_free_space_target 86ULL
 #define WT_CONF_ID_full_target 204ULL
@@ -214,7 +214,7 @@
 #define WT_CONF_ID_granularity 143ULL
 #define WT_CONF_ID_handles 195ULL
 #define WT_CONF_ID_hashsize 206ULL
-#define WT_CONF_ID_hazard_max 358ULL
+#define WT_CONF_ID_hazard_max 359ULL
 #define WT_CONF_ID_huffman_key 27ULL
 #define WT_CONF_ID_huffman_value 28ULL
 #define WT_CONF_ID_id 56ULL
@@ -231,7 +231,7 @@
 #define WT_CONF_ID_internal_key_truncate 33ULL
 #define WT_CONF_ID_internal_page_delta 305ULL
 #define WT_CONF_ID_internal_page_max 34ULL
-#define WT_CONF_ID_interval 374ULL
+#define WT_CONF_ID_interval 375ULL
 #define WT_CONF_ID_isolation 173ULL
 #define WT_CONF_ID_json 316ULL
 #define WT_CONF_ID_json_output 291ULL
@@ -263,9 +263,9 @@
 #define WT_CONF_ID_metadata 197ULL
 #define WT_CONF_ID_metadata_file 93ULL
 #define WT_CONF_ID_method 219ULL
-#define WT_CONF_ID_mmap 363ULL
-#define WT_CONF_ID_mmap_all 364ULL
-#define WT_CONF_ID_multiprocess 365ULL
+#define WT_CONF_ID_mmap 364ULL
+#define WT_CONF_ID_mmap_all 365ULL
+#define WT_CONF_ID_multiprocess 366ULL
 #define WT_CONF_ID_name 24ULL
 #define WT_CONF_ID_nbits 59ULL
 #define WT_CONF_ID_next_random 146ULL
@@ -290,7 +290,7 @@
 #define WT_CONF_ID_pinned 340ULL
 #define WT_CONF_ID_prealloc 297ULL
 #define WT_CONF_ID_prealloc_init_count 298ULL
-#define WT_CONF_ID_precise_checkpoint 366ULL
+#define WT_CONF_ID_precise_checkpoint 367ULL
 #define WT_CONF_ID_prefer_scrub_eviction 267ULL
 #define WT_CONF_ID_prefix 107ULL
 #define WT_CONF_ID_prefix_compression 47ULL
@@ -299,7 +299,7 @@
 #define WT_CONF_ID_prepare_timestamp 180ULL
 #define WT_CONF_ID_prepared 178ULL
 #define WT_CONF_ID_prepared_id 181ULL
-#define WT_CONF_ID_preserve_prepared 369ULL
+#define WT_CONF_ID_preserve_prepared 370ULL
 #define WT_CONF_ID_priority 176ULL
 #define WT_CONF_ID_quota 313ULL
 #define WT_CONF_ID_raw 149ULL
@@ -307,12 +307,12 @@
 #define WT_CONF_ID_read 179ULL
 #define WT_CONF_ID_read_corrupt 166ULL
 #define WT_CONF_ID_read_once 150ULL
-#define WT_CONF_ID_read_size 359ULL
+#define WT_CONF_ID_read_size 360ULL
 #define WT_CONF_ID_read_timestamp 4ULL
 #define WT_CONF_ID_readonly 60ULL
 #define WT_CONF_ID_realloc_exact 245ULL
 #define WT_CONF_ID_realloc_malloc 246ULL
-#define WT_CONF_ID_recover 362ULL
+#define WT_CONF_ID_recover 363ULL
 #define WT_CONF_ID_release 222ULL
 #define WT_CONF_ID_release_evict 136ULL
 #define WT_CONF_ID_release_evict_page 327ULL
@@ -326,12 +326,13 @@
 #define WT_CONF_ID_rollback_error 247ULL
 #define WT_CONF_ID_rollback_timestamp 182ULL
 #define WT_CONF_ID_run_once 87ULL
-#define WT_CONF_ID_salvage 370ULL
+#define WT_CONF_ID_salvage 371ULL
 #define WT_CONF_ID_schema_epoch 154ULL
 #define WT_CONF_ID_secretkey 351ULL
-#define WT_CONF_ID_session_max 371ULL
-#define WT_CONF_ID_session_scratch_max 372ULL
-#define WT_CONF_ID_session_table_cache 373ULL
+#define WT_CONF_ID_session_dhandle_buckets 358ULL
+#define WT_CONF_ID_session_max 372ULL
+#define WT_CONF_ID_session_scratch_max 373ULL
+#define WT_CONF_ID_session_table_cache 374ULL
 #define WT_CONF_ID_sessions 198ULL
 #define WT_CONF_ID_shared 118ULL
 #define WT_CONF_ID_show_prepared_rollback 135ULL
@@ -382,21 +383,21 @@
 #define WT_CONF_ID_txn 199ULL
 #define WT_CONF_ID_type 9ULL
 #define WT_CONF_ID_update_restore_evict 253ULL
-#define WT_CONF_ID_use_environment 376ULL
-#define WT_CONF_ID_use_environment_priv 377ULL
+#define WT_CONF_ID_use_environment 377ULL
+#define WT_CONF_ID_use_environment_priv 378ULL
 #define WT_CONF_ID_use_timestamp 188ULL
 #define WT_CONF_ID_value_format 52ULL
 #define WT_CONF_ID_verbose 10ULL
-#define WT_CONF_ID_verify_metadata 378ULL
+#define WT_CONF_ID_verify_metadata 379ULL
 #define WT_CONF_ID_version 61ULL
 #define WT_CONF_ID_visible_only 130ULL
 #define WT_CONF_ID_wait 217ULL
-#define WT_CONF_ID_write_through 379ULL
+#define WT_CONF_ID_write_through 380ULL
 #define WT_CONF_ID_write_timestamp 5ULL
 #define WT_CONF_ID_write_timestamp_usage 11ULL
 #define WT_CONF_ID_zero_fill 300ULL
 
-#define WT_CONF_ID_COUNT 380
+#define WT_CONF_ID_COUNT 381
 /*
  * API configuration keys: END
  */
@@ -531,6 +532,7 @@ static const struct {
     struct {
         uint64_t buckets;
         uint64_t dhandle_buckets;
+        uint64_t session_dhandle_buckets;
     } Hash;
     struct {
         uint64_t checkpoint_cleanup_obsolete_tw_pages_dirty_max;
@@ -957,6 +959,7 @@ static const struct {
   {
     WT_CONF_ID_Hash | (WT_CONF_ID_buckets << 16),
     WT_CONF_ID_Hash | (WT_CONF_ID_dhandle_buckets << 16),
+    WT_CONF_ID_Hash | (WT_CONF_ID_session_dhandle_buckets << 16),
   },
   {
     WT_CONF_ID_Heuristic_controls |

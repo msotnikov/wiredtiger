@@ -1038,6 +1038,12 @@ struct __wt_connection_impl {
     WT_BLKCACHE blkcache;             /* Block cache */
     WT_CHECKPOINT_CLEANUP cc_cleanup; /* Checkpoint cleanup */
 
+    /*
+     * A flag per data handle hash bucket, set when a tree in the bucket may need work from the next
+     * checkpoint. The checkpoint handle gather walks only the flagged buckets.
+     */
+    wt_shared bool *dh_bucket_ckpt;
+
     uint64_t *dh_bucket_count;                   /* Locked: handles in each bucket */
     wt_shared uint64_t dhandle_count;            /* Locked: handles in the queue */
     wt_shared uint64_t dhandle_checkpoint_count; /* Locked: checkpoint handles in the queue */

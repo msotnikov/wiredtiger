@@ -139,6 +139,7 @@ __wti_connection_destroy(WT_CONNECTION_IMPL *conn)
     /* Free allocated hash buckets. */
     __wt_free(session, conn->blockhash);
     __wt_free(session, conn->dh_bucket_count);
+    __wt_free(session, conn->dh_bucket_ckpt);
     __wt_free(session, conn->dhhash);
     __wt_free(session, conn->fhhash);
 

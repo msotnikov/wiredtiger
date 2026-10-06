@@ -1900,8 +1900,11 @@ __conn_hash_config(WT_SESSION_IMPL *session, const char *cfg[])
     }
     WT_RET(__wt_calloc_def(session, conn->dh_hash_size, &conn->dh_bucket_count));
     WT_RET(__wt_calloc_def(session, conn->dh_hash_size, &conn->dhhash));
-    for (i = 0; i < conn->dh_hash_size; ++i)
+    WT_RET(__wt_calloc_def(session, conn->dh_hash_size, &conn->dh_bucket_ckpt));
+    for (i = 0; i < conn->dh_hash_size; ++i) {
         TAILQ_INIT(&conn->dhhash[i]);
+        conn->dh_bucket_ckpt[i] = true;
+    }
 
     return (0);
 }

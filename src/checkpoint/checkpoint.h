@@ -49,6 +49,9 @@ struct __wt_ckpt_session {
     /* Named checkpoint drop list, during a checkpoint */
     WT_ITEM *drop_list;
 
+    /* Gather walks only the flagged data handle hash buckets, during a checkpoint */
+    bool gather_buckets;
+
     /* Checkpoint time of current checkpoint, during a checkpoint */
     uint64_t current_sec;
 
@@ -88,6 +91,9 @@ struct __wt_ckpt_connection {
 
     /* Last checkpoint connection's base write generation. */
     uint64_t last_base_write_gen;
+
+    /* Checkpoint generation whose handle gather walked only the flagged buckets and completed. */
+    wt_shared uint64_t gather_bucket_gen;
 };
 
 /*
@@ -258,6 +264,8 @@ struct __wt_checkpoint_reconcile_threads {
 
 extern WT_CKPT_EVICTION_SNAP *__wt_ckpt_eviction_snap_current(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern bool __wt_checkpoint_bucket_keep(WT_DATA_HANDLE *dhandle)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern bool __wt_checkpoint_verbose_timer_started(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_checkpoint_close(WT_SESSION_IMPL *session, bool final)
@@ -284,6 +292,7 @@ extern int __wt_checkpoint_server_destroy(WT_SESSION_IMPL *session)
 extern int __wt_checkpoint_sync(WT_SESSION_IMPL *session, const char *cfg[])
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern void __wt_checkpoint_apply_or_skip_handle_stats(WT_SESSION_IMPL *session, uint64_t time_us);
+extern void __wt_checkpoint_bucket_set(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle);
 extern void __wt_checkpoint_free(WT_SESSION_IMPL *session, WT_CKPT *ckpt);
 extern void __wt_checkpoint_handle_stats(
   WT_SESSION_IMPL *session, uint64_t gathering_handles_time_us);
@@ -296,6 +305,7 @@ extern void __wt_checkpoint_signal(WT_SESSION_IMPL *session, wt_off_t logsize);
 extern void __wt_checkpoint_snapshot_clear(WT_CKPT_SNAPSHOT *snapshot);
 extern void __wt_checkpoint_timer_stats(WT_SESSION_IMPL *session);
 extern void __wt_checkpoint_timer_stats_clear(WT_SESSION_IMPL *session);
+extern void __wt_checkpoint_tree_modified(WT_SESSION_IMPL *session, WT_BTREE *btree);
 extern void __wt_checkpoint_tree_reconcile_update(WT_SESSION_IMPL *session, WT_TIME_AGGREGATE *ta);
 extern void __wt_checkpoint_update_generation(WT_SESSION_IMPL *session, WT_BTREE *btree);
 extern void __wt_ckptlist_free(WT_SESSION_IMPL *session, WT_CKPT **ckptbasep);

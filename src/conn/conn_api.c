@@ -2323,6 +2323,12 @@ __wti_debug_mode_config(WT_SESSION_IMPL *session, const char *cfg[])
     else
         FLD_CLR(conn->debug.flags, WT_CONN_DEBUG_CONFIGURATION);
 
+    WT_RET(__wt_config_gets(session, cfg, "debug_mode.checkpoint_gather_walk", &cval));
+    if (cval.val)
+        FLD_SET(conn->debug.flags, WT_CONN_DEBUG_CKPT_GATHER_WALK);
+    else
+        FLD_CLR(conn->debug.flags, WT_CONN_DEBUG_CKPT_GATHER_WALK);
+
     WT_RET(__wt_config_gets(session, cfg, "debug_mode.corruption_abort", &cval));
     if (cval.val)
         FLD_SET(conn->debug.flags, WT_CONN_DEBUG_CORRUPTION_ABORT);

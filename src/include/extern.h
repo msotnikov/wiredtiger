@@ -24,6 +24,8 @@ extern bool __wt_clayered_value_in_tombstone_namespace(const WT_ITEM *value, boo
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern bool __wt_config_get_choice(const char **choices, WT_CONFIG_ITEM *item)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern bool __wt_conn_btree_apply_skip(WT_DATA_HANDLE *dhandle)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern bool __wt_conn_is_disagg(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern bool __wt_disagg_has_picked_up_checkpoint(WT_SESSION_IMPL *session)
@@ -431,6 +433,10 @@ extern int __wt_configure_method(WT_SESSION_IMPL *session, const char *method, c
 extern int __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
   int (*file_func)(WT_SESSION_IMPL *, const char *[]),
   int (*name_func)(WT_SESSION_IMPL *, const char *, bool *),
+  int (*skip_func)(WT_SESSION_IMPL *, WT_DATA_HANDLE *, bool *), const char *cfg[])
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern int __wt_conn_btree_apply_one(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle,
+  int (*file_func)(WT_SESSION_IMPL *, const char *[]),
   int (*skip_func)(WT_SESSION_IMPL *, WT_DATA_HANDLE *, bool *), const char *cfg[])
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_conn_call_log_setup(WT_SESSION_IMPL *session)
@@ -2574,6 +2580,7 @@ static WT_INLINE void __wt_btcur_skip_page_inc(
   WT_REF *ref, WT_PAGE_WALK_SKIP_STATS *walk_skip_stats);
 static WT_INLINE void __wt_btree_advance_ingest_max(WT_BTREE *btree, wt_timestamp_t durable_ts);
 static WT_INLINE void __wt_btree_disable_bulk(WT_SESSION_IMPL *session);
+static WT_INLINE void __wt_btree_modified_set(WT_SESSION_IMPL *session, WT_BTREE *btree);
 static WT_INLINE void __wt_btree_row_leaf_entries_update(WT_BTREE *btree, uint64_t sample);
 static WT_INLINE void __wt_btree_update_unpublished_min(WT_BTREE *btree, wt_timestamp_t durable_ts);
 static WT_INLINE void __wt_buf_free(WT_SESSION_IMPL *session, WT_ITEM *buf);

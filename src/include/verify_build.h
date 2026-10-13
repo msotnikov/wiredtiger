@@ -72,6 +72,11 @@ static_assert((WT_UPDATE_SIZE_NOVALUE - WT_UPDATE_SIZE) == 0, "WT_UPDATE size mi
     static_assert(sizeof(s) > WT_CACHE_LINE_ALIGNMENT || sizeof(s) % WT_CACHE_LINE_ALIGNMENT == 0, \
       #s " padding check failed")
 WT_PADDING_CHECK(WT_TXN_SHARED);
+WT_PADDING_CHECK(WTI_CKPT_PENDING_STACK);
+
+/* A session picks a checkpoint pending stack by masking its ID. */
+static_assert((WTI_CKPT_PENDING_STACKS & (WTI_CKPT_PENDING_STACKS - 1)) == 0,
+  "WTI_CKPT_PENDING_STACKS is not a power of two");
 
 /*
  * The btree code encodes key/value pairs in size_t's, and requires at least 8B size_t's.

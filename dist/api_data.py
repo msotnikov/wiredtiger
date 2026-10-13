@@ -671,6 +671,10 @@ connection_runtime_config = [
             adjust log removal to retain the log records of this number of checkpoints. Zero
             or one means perform normal removal.''',
             min='0', max='1024'),
+        Config('checkpoint_gather_walk', 'false', r'''
+            if true, the checkpoint handle gather walks every open handle instead of visiting only
+            the trees modified or opened since the last checkpoint.''',
+            type='boolean'),
         Config('configuration', 'false', r'''
                if true, display invalid cache configuration warnings.''',
                type='boolean'),

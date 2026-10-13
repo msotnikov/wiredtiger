@@ -2577,6 +2577,8 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint: fsync calls after allocating the transaction ID",
   "checkpoint: fsync duration after allocating the transaction ID (usecs)",
   "checkpoint: generation",
+  "checkpoint: handle gathers that visited only the pending trees",
+  "checkpoint: handle gathers that walked every open handle",
   "checkpoint: max time (msecs)",
   "checkpoint: metadata operations applied during disaggregated checkpoint",
   "checkpoint: metadata operations skipped during disaggregated checkpoint because they were not "
@@ -2595,6 +2597,8 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint: most recent handles skipped",
   "checkpoint: most recent handles walked",
   "checkpoint: most recent time (msecs)",
+  "checkpoint: most recent trees taken from the pending stacks",
+  "checkpoint: most recent trees the gather kept in the pending stacks",
   "checkpoint: number of bytes reconciled",
   "checkpoint: number of checkpoints started by api",
   "checkpoint: number of checkpoints started by compaction",
@@ -2625,6 +2629,7 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint: total succeed number of checkpoints",
   "checkpoint: total time (msecs)",
   "checkpoint: total time (msecs) writing pages to stable storage during checkpoint reconciliation",
+  "checkpoint: trees added to the pending stacks when modified or opened",
   "checkpoint: wait cycles while cache dirty level is decreasing",
   "connection: auto adjusting condition resets",
   "connection: auto adjusting condition wait calls",
@@ -3721,6 +3726,8 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->checkpoint_fsync_post = 0;
     /* not clearing checkpoint_fsync_post_duration */
     /* not clearing checkpoint_generation */
+    stats->checkpoint_handle_gather_pending = 0;
+    stats->checkpoint_handle_gather_walk = 0;
     /* not clearing checkpoint_time_max */
     /* not clearing checkpoint_disagg_metadata_apply */
     /* not clearing checkpoint_disagg_metadata_unstable */
@@ -3738,6 +3745,8 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->checkpoint_handle_skipped = 0;
     stats->checkpoint_handle_walked = 0;
     /* not clearing checkpoint_time_recent */
+    stats->checkpoint_handle_pending_taken = 0;
+    stats->checkpoint_handle_pending_kept = 0;
     stats->checkpoint_pages_reconciled_bytes = 0;
     stats->checkpoints_api = 0;
     stats->checkpoints_compact = 0;
@@ -3767,6 +3776,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->checkpoints_total_succeed = 0;
     /* not clearing checkpoint_time_total */
     stats->checkpoint_rec_blkcache_write = 0;
+    stats->checkpoint_handle_pending_added = 0;
     stats->checkpoint_wait_reduce_dirty = 0;
     stats->cond_auto_wait_reset = 0;
     stats->cond_auto_wait = 0;
@@ -4968,6 +4978,9 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->checkpoint_fsync_post += WT_STAT_CONN_READ(from, checkpoint_fsync_post);
     to->checkpoint_fsync_post_duration += WT_STAT_CONN_READ(from, checkpoint_fsync_post_duration);
     to->checkpoint_generation += WT_STAT_CONN_READ(from, checkpoint_generation);
+    to->checkpoint_handle_gather_pending +=
+      WT_STAT_CONN_READ(from, checkpoint_handle_gather_pending);
+    to->checkpoint_handle_gather_walk += WT_STAT_CONN_READ(from, checkpoint_handle_gather_walk);
     to->checkpoint_time_max += WT_STAT_CONN_READ(from, checkpoint_time_max);
     to->checkpoint_disagg_metadata_apply +=
       WT_STAT_CONN_READ(from, checkpoint_disagg_metadata_apply);
@@ -4989,6 +5002,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->checkpoint_handle_skipped += WT_STAT_CONN_READ(from, checkpoint_handle_skipped);
     to->checkpoint_handle_walked += WT_STAT_CONN_READ(from, checkpoint_handle_walked);
     to->checkpoint_time_recent += WT_STAT_CONN_READ(from, checkpoint_time_recent);
+    to->checkpoint_handle_pending_taken += WT_STAT_CONN_READ(from, checkpoint_handle_pending_taken);
+    to->checkpoint_handle_pending_kept += WT_STAT_CONN_READ(from, checkpoint_handle_pending_kept);
     to->checkpoint_pages_reconciled_bytes +=
       WT_STAT_CONN_READ(from, checkpoint_pages_reconciled_bytes);
     to->checkpoints_api += WT_STAT_CONN_READ(from, checkpoints_api);
@@ -5022,6 +5037,7 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->checkpoints_total_succeed += WT_STAT_CONN_READ(from, checkpoints_total_succeed);
     to->checkpoint_time_total += WT_STAT_CONN_READ(from, checkpoint_time_total);
     to->checkpoint_rec_blkcache_write += WT_STAT_CONN_READ(from, checkpoint_rec_blkcache_write);
+    to->checkpoint_handle_pending_added += WT_STAT_CONN_READ(from, checkpoint_handle_pending_added);
     to->checkpoint_wait_reduce_dirty += WT_STAT_CONN_READ(from, checkpoint_wait_reduce_dirty);
     to->cond_auto_wait_reset += WT_STAT_CONN_READ(from, cond_auto_wait_reset);
     to->cond_auto_wait += WT_STAT_CONN_READ(from, cond_auto_wait);

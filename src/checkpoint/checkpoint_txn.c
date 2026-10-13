@@ -318,12 +318,12 @@ __checkpoint_disagg_maybe_publish(WT_SESSION_IMPL *session, WT_BTREE *btree)
 }
 
 /*
- * __checkpoint_tree_not_gathered --
+ * __wti_checkpoint_tree_not_gathered --
  *     Return if the handle gather leaves the tree out. The history store is checkpointed later, on
  *     its own.
  */
-static WT_INLINE bool
-__checkpoint_tree_not_gathered(WT_BTREE *btree)
+bool
+__wti_checkpoint_tree_not_gathered(WT_BTREE *btree)
 {
     return (F_ISSET(btree, WT_BTREE_IN_MEMORY) || F_ISSET_ATOMIC_32(btree, WT_BTREE_READONLY) ||
       WT_IS_HS(btree->dhandle));
@@ -403,7 +403,7 @@ __checkpoint_gather_skip(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, bool
     if (F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH))
         return (0);
 
-    if (__checkpoint_tree_not_gathered(btree)) {
+    if (__wti_checkpoint_tree_not_gathered(btree)) {
         *skipp = true;
         return (0);
     }
@@ -454,6 +454,13 @@ __wt_checkpoint_get_handles(WT_SESSION_IMPL *session, const char *cfg[])
     btree = S2BT(session);
 
     /*
+     * The tree is locked: an exclusive reopen, which clears the btree structure, cannot run now. A
+     * tree that becomes modified after a gather from the pending stacks completes has its
+     * checkpoint generation raised unless this gather visited it.
+     */
+    __wt_atomic_store_uint64_relaxed(&btree->ckpt_gather_gen, __wt_gen(session, WT_GEN_CHECKPOINT));
+
+    /*
      * A disaggregated btree carries WT_BTREE_AWAITS_PUBLISH when it was created while a stable
      * schema epoch was set and is waiting to be published. Clear the flag if the btree is ready to
      * participate in this checkpoint; its pages are dirty (nothing was written while it awaited
@@ -463,7 +470,8 @@ __wt_checkpoint_get_handles(WT_SESSION_IMPL *session, const char *cfg[])
         WT_RET(__checkpoint_disagg_maybe_publish(session, btree));
 
     /* Skip the history store file as it is checkpointed manually later. */
-    if (__checkpoint_tree_not_gathered(btree) || F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH))
+    if (__wti_checkpoint_tree_not_gathered(btree) ||
+      F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH))
         return (0);
 
     if (__wt_conn_is_disagg(session)) {
@@ -1055,7 +1063,7 @@ __checkpoint_fail_reset(WT_SESSION_IMPL *session)
     WT_BTREE *btree;
 
     btree = S2BT(session);
-    btree->modified = true;
+    __wt_btree_modified_set(session, btree);
 
     /* Revert the in-memory root page accounting as we have failed during checkpointing. */
     __wt_block_disagg_checkpoint_rollback(session);
@@ -1342,9 +1350,11 @@ __checkpoint_prepare(WT_SESSION_IMPL *session, bool *trackingp, WT_CHECKPOINT_DB
     WT_ASSERT(session, session->ckpt.handle_next == 0);
     skip_func =
       ckpt_cfg->force || ckpt_cfg->named || ckpt_cfg->drop ? NULL : __checkpoint_gather_skip;
+    __wti_checkpoint_pending_mode_set(session, ckpt_cfg->force, ckpt_cfg->named || ckpt_cfg->drop);
     WT_WITH_TABLE_READ_LOCK(session,
       ret =
         __checkpoint_apply_operation(session, ckpt_cfg, __wt_checkpoint_get_handles, skip_func));
+    conn->ckpt.pending.mode = WTI_CKPT_GATHER_WALK;
 
     __wt_epoch(session, &conn->ckpt.prepare.timer_end);
     WT_STAT_CONN_SET(session, checkpoint_prep_running, 0);
@@ -1844,6 +1854,7 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
         return (ret);
     }
     if (ckpt_cfg.can_skip) {
+        __wti_checkpoint_pending_prune(session);
         WT_STAT_CONN_INCR(session, checkpoint_skipped);
         WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_INACTIVE);
         return (ret);
@@ -3408,7 +3419,7 @@ err:
      * If the checkpoint didn't complete successfully, make sure the tree is marked dirty.
      */
     if (ret != 0) {
-        btree->modified = true;
+        __wt_btree_modified_set(session, btree);
         conn->modified = true;
     }
 

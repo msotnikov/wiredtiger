@@ -88,6 +88,9 @@ struct __wt_ckpt_connection {
 
     /* Last checkpoint connection's base write generation. */
     uint64_t last_base_write_gen;
+
+    /* Trees that may need work from the next checkpoint. */
+    WTI_CKPT_PENDING pending;
 };
 
 /*
@@ -266,6 +269,10 @@ extern int __wt_checkpoint_db(WT_SESSION_IMPL *session, const char *cfg[], bool 
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_checkpoint_file(WT_SESSION_IMPL *session, const char *cfg[])
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern int __wt_checkpoint_gather_start(WT_SESSION_IMPL *session,
+  int (*file_func)(WT_SESSION_IMPL *, const char *[]),
+  int (*skip_func)(WT_SESSION_IMPL *, WT_DATA_HANDLE *, bool *), const char *cfg[],
+  uint64_t *walkedp, bool *donep) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_checkpoint_get_handles(WT_SESSION_IMPL *session, const char *cfg[])
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_checkpoint_parallel_finish(WT_SESSION_IMPL *session, uint64_t *reconcile_timep)
@@ -285,9 +292,12 @@ extern int __wt_checkpoint_sync(WT_SESSION_IMPL *session, const char *cfg[])
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern void __wt_checkpoint_apply_or_skip_handle_stats(WT_SESSION_IMPL *session, uint64_t time_us);
 extern void __wt_checkpoint_free(WT_SESSION_IMPL *session, WT_CKPT *ckpt);
+extern void __wt_checkpoint_gather_end(WT_SESSION_IMPL *session, bool success);
+extern void __wt_checkpoint_gather_visited(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle);
 extern void __wt_checkpoint_handle_stats(
   WT_SESSION_IMPL *session, uint64_t gathering_handles_time_us);
 extern void __wt_checkpoint_handle_stats_clear(WT_SESSION_IMPL *session);
+extern void __wt_checkpoint_pending_clear(WT_SESSION_IMPL *session);
 extern void __wt_checkpoint_progress_stats(WT_SESSION_IMPL *session, uint64_t write_bytes);
 extern void __wt_checkpoint_rec_time_stats(
   WT_SESSION_IMPL *session, uint64_t reconcile_time_ticks, uint64_t sync_time_ticks);
@@ -296,15 +306,24 @@ extern void __wt_checkpoint_signal(WT_SESSION_IMPL *session, wt_off_t logsize);
 extern void __wt_checkpoint_snapshot_clear(WT_CKPT_SNAPSHOT *snapshot);
 extern void __wt_checkpoint_timer_stats(WT_SESSION_IMPL *session);
 extern void __wt_checkpoint_timer_stats_clear(WT_SESSION_IMPL *session);
+extern void __wt_checkpoint_tree_modified(WT_SESSION_IMPL *session, WT_BTREE *btree);
+extern void __wt_checkpoint_tree_opened(WT_SESSION_IMPL *session, WT_BTREE *btree);
 extern void __wt_checkpoint_tree_reconcile_update(WT_SESSION_IMPL *session, WT_TIME_AGGREGATE *ta);
 extern void __wt_checkpoint_update_generation(WT_SESSION_IMPL *session, WT_BTREE *btree);
 extern void __wt_ckptlist_free(WT_SESSION_IMPL *session, WT_CKPT **ckptbasep);
 extern void __wt_ckptlist_saved_free(WT_SESSION_IMPL *session);
 
 #ifdef HAVE_UNITTEST
+extern WT_DATA_HANDLE *__ut_checkpoint_pending_take(WTI_CKPT_PENDING *pending, uint64_t *countp)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern bool __ut_checkpoint_pending_add(WTI_CKPT_PENDING *pending, uint32_t slot,
+  WT_DATA_HANDLE *dhandle) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern bool __ut_checkpoint_skip_ckptlist(WT_CKPT *ckptbase)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern void __ut_checkpoint_eviction_snapshot_retire(WT_SESSION_IMPL *session);
+extern void __ut_checkpoint_pending_return(
+  WTI_CKPT_PENDING *pending, uint32_t slot, WT_DATA_HANDLE *chain);
+extern void __ut_checkpoint_pending_unflag(WT_DATA_HANDLE *dhandle);
 
 #endif
 

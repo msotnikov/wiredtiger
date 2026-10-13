@@ -178,6 +178,14 @@ struct __wt_data_handle {
      */
     WT_SPINLOCK close_lock; /* Lock to close the handle */
 
+    /* Next handle in the same checkpoint pending stack */
+    wt_shared WT_DATA_HANDLE *ckpt_pending_next;
+    /*
+     * Set while a checkpoint pending stack or the running gather holds the handle. A handle is in
+     * at most one stack, and the stack holds a reference to it.
+     */
+    wt_shared uint8_t ckpt_pending;
+
     /* Data-source statistics */
     WT_DSRC_STATS *stats[WT_STAT_DSRC_COUNTER_SLOTS];
     WT_DSRC_STATS *stat_array;

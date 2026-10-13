@@ -115,6 +115,9 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
     F_SET_ATOMIC_32(conn, WT_CONN_CLOSING_NO_MORE_OPENS);
     WT_FULL_BARRIER();
 
+    /* Release the references the checkpoint pending stacks hold before the handles go. */
+    __wt_checkpoint_pending_clear(session);
+
     /* Close open data handles. */
     WT_TRET(__wti_conn_dhandle_discard(session));
 

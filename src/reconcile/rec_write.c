@@ -646,12 +646,11 @@ __rec_write_page_status(WT_SESSION_IMPL *session, WTI_RECONCILE *r)
          * The page remains dirty.
          *
          * Any checkpoint call cleared the tree's modified flag before writing pages, so we must
-         * explicitly reset it. We insert a barrier after the change for clarity (the requirement is
-         * the flag be set before a subsequent checkpoint reads it, and as the current checkpoint is
-         * waiting on this reconciliation to complete, there's no risk of that happening).
+         * explicitly reset it and add the tree to the checkpoint pending stacks, so the next
+         * checkpoint visits it. The flag must be set before a subsequent checkpoint reads it; the
+         * current checkpoint is waiting on this reconciliation to complete.
          */
-        btree->modified = true;
-        WT_FULL_BARRIER();
+        __wt_btree_modified_set(session, btree);
         if (!S2C(session)->modified)
             S2C(session)->modified = true;
 

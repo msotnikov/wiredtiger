@@ -723,6 +723,9 @@ __wt_conn_dhandle_open(WT_SESSION_IMPL *session, const char *cfg[], uint32_t fla
     if (dhandle->checkpoint == NULL)
         __wt_atomic_add_uint32(&S2C(session)->open_btree_count, 1);
 
+    if (WT_DHANDLE_BTREE(dhandle) && dhandle->checkpoint == NULL)
+        __wt_checkpoint_tree_opened(session, btree);
+
     if (0) {
 err:
         if (btree != NULL)
@@ -791,6 +794,30 @@ __conn_btree_apply_internal(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle,
 }
 
 /*
+ * __wt_conn_btree_apply_one --
+ *     Apply a function to an open btree handle that a handle walk without a URI did not skip.
+ */
+int
+__wt_conn_btree_apply_one(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle,
+  int (*file_func)(WT_SESSION_IMPL *, const char *[]),
+  int (*skip_func)(WT_SESSION_IMPL *, WT_DATA_HANDLE *, bool *), const char *cfg[])
+{
+    return (__conn_btree_apply_internal(session, dhandle, file_func, NULL, skip_func, cfg));
+}
+
+/*
+ * __wt_conn_btree_apply_skip --
+ *     Return true if a handle walk without a URI skips the handle.
+ */
+bool
+__wt_conn_btree_apply_skip(WT_DATA_HANDLE *dhandle)
+{
+    return (!F_ISSET(dhandle, WT_DHANDLE_OPEN) || F_ISSET(dhandle, WT_DHANDLE_DEAD) ||
+      __wt_atomic_load_bool_relaxed(&dhandle->outdated) || !WT_DHANDLE_BTREE(dhandle) ||
+      dhandle->checkpoint != NULL || WT_IS_ANY_METADATA(dhandle));
+}
+
+/*
  * __wt_conn_btree_apply --
  *     Apply a function to all open btree handles with the given URI. The optional skip function is
  *     called before a handle is locked.
@@ -804,9 +831,12 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
     WT_CONNECTION_IMPL *conn;
     WT_DATA_HANDLE *dhandle;
     WT_DECL_RET;
-    uint64_t bucket, time_diff, time_start, time_stop;
+    uint64_t bucket, time_diff, time_start, time_stop, walked;
+    bool ckpt_gather, done;
 
     conn = S2C(session);
+    dhandle = NULL;
+    ckpt_gather = false;
     /*
      * If we're given a URI, then we walk only the hash list for that name. If we don't have a URI
      * we walk the entire dhandle list.
@@ -829,10 +859,18 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
         }
     } else {
         time_start = 0;
+        walked = conn->dhandle_count;
         if (WT_SESSION_IS_CHECKPOINT(session)) {
             time_start = __wt_clock(session);
             __wt_checkpoint_handle_stats_clear(session);
             F_SET_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
+
+            /* The checkpoint may visit only the trees in its pending stacks instead of walking. */
+            ckpt_gather = true;
+            WT_ERR(
+              __wt_checkpoint_gather_start(session, file_func, skip_func, cfg, &walked, &done));
+            if (done)
+                goto done;
         }
         /*
          * Walk backwards. The sweep server walks this list forwards, write-locking each handle
@@ -846,28 +884,32 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
             if (dhandle == NULL)
                 goto done;
 
-            if (!F_ISSET(dhandle, WT_DHANDLE_OPEN) || F_ISSET(dhandle, WT_DHANDLE_DEAD) ||
-              __wt_atomic_load_bool_relaxed(&dhandle->outdated) || !WT_DHANDLE_BTREE(dhandle) ||
-              dhandle->checkpoint != NULL || WT_IS_ANY_METADATA(dhandle))
+            if (__wt_conn_btree_apply_skip(dhandle))
                 continue;
 
             WT_ERR(
               __conn_btree_apply_internal(session, dhandle, file_func, name_func, skip_func, cfg));
+            if (ckpt_gather)
+                __wt_checkpoint_gather_visited(session, dhandle);
         }
 done:
-        if (time_start != 0) {
+        if (ckpt_gather) {
+            __wt_checkpoint_gather_end(session, true);
             F_CLR_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
             time_stop = __wt_clock(session);
             time_diff = WT_CLOCKDIFF_US(time_stop, time_start);
             __wt_checkpoint_handle_stats(session, time_diff);
-            WT_STAT_CONN_SET(session, checkpoint_handle_walked, conn->dhandle_count);
+            WT_STAT_CONN_SET(session, checkpoint_handle_walked, walked);
         }
         return (0);
     }
 
 err:
     F_CLR_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
-    WT_DHANDLE_RELEASE(dhandle);
+    if (dhandle != NULL)
+        WT_DHANDLE_RELEASE(dhandle);
+    if (ckpt_gather)
+        __wt_checkpoint_gather_end(session, false);
     return (ret);
 }
 

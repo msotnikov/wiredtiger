@@ -34,11 +34,17 @@ the dhandle in the session's dhandle cache.
 
 There are two relevant reference counters in the dhandle structure,
 \c references and \c session_inuse. \c references counts the number of
-session dhandle cache lists that contain this dhandle. \c session_inuse
+session dhandle cache lists that contain this dhandle, plus the cached
+cursors and the checkpoint pending stacks that hold it. \c session_inuse
 is a count of the number of cursors opened and operating on this dhandle.
 Both these counters are incremented by the session as the cursor is opened on
 this dhandle. \c session_inuse is decremented when the operation completes
 and the cursor is closed.
+
+A dhandle on a checkpoint pending stack holds a reference until the next
+checkpoint that gathers handles, or a skipped checkpoint, takes the stack. The
+sweep server can close and mark dead such a dhandle, but it does not free it
+until that reference is released.
 
 @section dhandle_sweep_server_dhandle_sweep Sweep-Server Dhandle Sweep
 

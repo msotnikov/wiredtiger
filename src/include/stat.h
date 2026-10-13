@@ -858,6 +858,8 @@ struct __wt_connection_stats {
     int64_t checkpoint_fsync_post;
     int64_t checkpoint_fsync_post_duration;
     int64_t checkpoint_generation;
+    int64_t checkpoint_handle_gather_pending;
+    int64_t checkpoint_handle_gather_walk;
     int64_t checkpoint_time_max;
     int64_t checkpoint_disagg_metadata_apply;
     int64_t checkpoint_disagg_metadata_unstable;
@@ -875,6 +877,8 @@ struct __wt_connection_stats {
     int64_t checkpoint_handle_skipped;
     int64_t checkpoint_handle_walked;
     int64_t checkpoint_time_recent;
+    int64_t checkpoint_handle_pending_taken;
+    int64_t checkpoint_handle_pending_kept;
     int64_t checkpoint_pages_reconciled_bytes;
     int64_t checkpoints_api;
     int64_t checkpoints_compact;
@@ -904,6 +908,7 @@ struct __wt_connection_stats {
     int64_t checkpoints_total_succeed;
     int64_t checkpoint_time_total;
     int64_t checkpoint_rec_blkcache_write;
+    int64_t checkpoint_handle_pending_added;
     int64_t checkpoint_wait_reduce_dirty;
     int64_t cond_auto_wait_reset;
     int64_t cond_auto_wait;

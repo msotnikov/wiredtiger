@@ -48,12 +48,26 @@ checkpoint state and gathers a list of handles to be checkpointed. A global sche
 checkpoint prepare to avoid any tables being created or dropped during this phase, additionally the
 global transaction lock is taken during this process as it must modify the global transaction state,
 and to ensure the \c stable_timestamp doesn't move ahead of the snapshot taken by the checkpoint
-transaction. The connection dhandle list is walked one handle at a time, where each handle gathered
-refers to a specific btree. Additionally clean btrees, i.e. btrees without any modifications, are excluded from
-the list, with an exception for specific checkpoint configuration scenarios. See
-\ref skipping-checkpoints "Skipping checkpoints" for scenarios where btrees are skipped during
-checkpoint. Btrees included in the checkpoint list then delete earlier checkpoints when possible.
-Previous checkpoints can only be discarded if the associated blocks are no longer used.
+transaction. Each handle gathered refers to a specific btree. Additionally clean btrees, i.e.
+btrees without any modifications, are excluded from the list, with an exception for specific
+checkpoint configuration scenarios. See \ref skipping-checkpoints "Skipping checkpoints" for
+scenarios where btrees are skipped during checkpoint. Btrees included in the checkpoint list then
+delete earlier checkpoints when possible. Previous checkpoints can only be discarded if the
+associated blocks are no longer used.
+
+The gather finds the btrees in one of two ways:
+- It walks the connection dhandle list one handle at a time.
+- It visits only the btrees in the checkpoint pending stacks. A btree is pushed on a pending stack
+  when it goes from clean to modified and when it is opened, before any of its updates commit, so
+  every update the checkpoint transaction can see is in a pushed btree. The gather takes every
+  stack, and after visiting a btree pushes it back if a later checkpoint may need it: the btree is
+  modified, in exclusive or special use, or has a clean checkpoint timer other than forever. A
+  pending dhandle holds a reference, see \ref dhandle_data_handle_reference_counts.
+
+The gather visits only the pending btrees once a walk that fills the stacks has completed. It walks
+every handle for the first checkpoint, for a forced checkpoint and for the checkpoint after a named
+or drop checkpoint, and always on a disaggregated connection, in recovery and for the checkpoint at
+close. The \c debug_mode.checkpoint_gather_walk configuration makes it always walk.
 
 ## Data files checkpoint ##
 
@@ -134,7 +148,10 @@ This logic can be overridden by forcing a checkpoint via configuration.
 
 The checkpoint generation indicates which iteration of checkpoint a file has undergone, at the start
 of a checkpoint the generation is incremented. Then after processing any btree its
-\c checkpoint_gen is set to the latest checkpoint generation. Checkpoint generations impact
+\c checkpoint_gen is set to the latest checkpoint generation. A gather that visits only the pending
+btrees does not process the other btrees: when one of them is next modified while that checkpoint
+runs, and once that gather completes for the btrees pushed after it took the stacks, the btree's
+\c checkpoint_gen is raised to the generation of the checkpoint. Checkpoint generations impact
 visibility checks within WiredTiger, essentially if a btree is behind a checkpoint, i.e. its
 checkpoint generation is less than the current checkpoint generation, then the checkpoint
 transaction id and checkpoint timestamp are included in certain visibility checks.

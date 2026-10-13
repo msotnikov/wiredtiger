@@ -32,6 +32,16 @@ __wt_tsan_suppress_store_uint8(uint8_t *vp, uint8_t v)
 }
 
 /*
+ * __wt_tsan_suppress_load_uint16 --
+ *     TSAN warnings suppression for uint16 load.
+ */
+static WT_INLINE uint16_t
+__wt_tsan_suppress_load_uint16(uint16_t *vp)
+{
+    return (__wt_atomic_load_uint16_relaxed(vp));
+}
+
+/*
  * __wt_tsan_suppress_load_uint32 --
  *     TSAN warnings suppression for uint32 load.
  */

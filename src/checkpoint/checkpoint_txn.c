@@ -318,12 +318,12 @@ __checkpoint_disagg_maybe_publish(WT_SESSION_IMPL *session, WT_BTREE *btree)
 }
 
 /*
- * __checkpoint_tree_not_gathered --
+ * __wti_checkpoint_tree_not_gathered --
  *     Return if the handle gather leaves the tree out. The history store is checkpointed later, on
  *     its own.
  */
-static WT_INLINE bool
-__checkpoint_tree_not_gathered(WT_BTREE *btree)
+bool
+__wti_checkpoint_tree_not_gathered(WT_BTREE *btree)
 {
     return (F_ISSET(btree, WT_BTREE_IN_MEMORY) || F_ISSET_ATOMIC_32(btree, WT_BTREE_READONLY) ||
       WT_IS_HS(btree->dhandle));
@@ -403,7 +403,7 @@ __checkpoint_gather_skip(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, bool
     if (F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH))
         return (0);
 
-    if (__checkpoint_tree_not_gathered(btree)) {
+    if (__wti_checkpoint_tree_not_gathered(btree)) {
         *skipp = true;
         return (0);
     }
@@ -418,204 +418,6 @@ __checkpoint_gather_skip(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, bool
     ++S2C(session)->ckpt.handle_stats.skip;
     *skipp = true;
     return (0);
-}
-
-/*
- * __checkpoint_list_ignores --
- *     Return true for trees the checkpoint lists leave out: the metadata, and the trees the handle
- *     gather returns from before any checkpoint work.
- */
-static WT_INLINE bool
-__checkpoint_list_ignores(WT_BTREE *btree)
-{
-    return (WT_IS_ANY_METADATA(btree->dhandle) || __checkpoint_tree_not_gathered(btree) ||
-      F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH));
-}
-
-/*
- * __checkpoint_list_push --
- *     Push a chain of handles, linked through ckpt_list_next, on the session's checkpoint list.
- */
-static void
-__checkpoint_list_push(WT_SESSION_IMPL *session, WT_DATA_HANDLE *first, WT_DATA_HANDLE *last)
-{
-    WT_CKPT_LIST *list;
-    WT_DATA_HANDLE *head;
-
-    list = &S2C(session)->ckpt.list[session->id & (WT_CKPT_LISTS - 1)];
-    do {
-        head = __wt_atomic_load_ptr_relaxed(&list->head);
-        last->ckpt_list_next = head;
-    } while (!__wt_atomic_cas_ptr(&list->head, head, first));
-}
-
-/*
- * __wt_checkpoint_list_add --
- *     Add a handle to a checkpoint list unless a list already holds it. The list holds a reference
- *     to the handle, as a cached cursor does: sweep can close the handle but does not free it.
- */
-void
-__wt_checkpoint_list_add(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle)
-{
-    if (!__wt_atomic_load_bool_acquire(&S2C(session)->ckpt.list_enabled))
-        return;
-
-    /* Test before the compare and swap, a handle stays listed until the next checkpoint gather. */
-    if (__wt_atomic_load_uint8_relaxed(&dhandle->ckpt_listed) != 0 ||
-      !__wt_atomic_cas_uint8(&dhandle->ckpt_listed, 0, 1))
-        return;
-
-    WT_DHANDLE_ACQUIRE(dhandle);
-    __checkpoint_list_push(session, dhandle, dhandle);
-}
-
-/*
- * __wt_checkpoint_list_take --
- *     Take every handle from the checkpoint lists. The caller owns the returned chain, linked
- *     through ckpt_list_next. Each handle in it is still flagged as listed and holds the list's
- *     reference.
- */
-WT_DATA_HANDLE *
-__wt_checkpoint_list_take(WT_SESSION_IMPL *session)
-{
-    WT_CKPT_LIST *list;
-    WT_DATA_HANDLE *chain, *head, *last;
-    u_int i;
-
-    chain = NULL;
-    for (i = 0; i < WT_CKPT_LISTS; ++i) {
-        list = &S2C(session)->ckpt.list[i];
-        do {
-            head = __wt_atomic_load_ptr_relaxed(&list->head);
-        } while (head != NULL && !__wt_atomic_cas_ptr(&list->head, head, NULL));
-        if (head == NULL)
-            continue;
-
-        for (last = head; last->ckpt_list_next != NULL; last = last->ckpt_list_next)
-            ;
-        last->ckpt_list_next = chain;
-        chain = head;
-    }
-    return (chain);
-}
-
-/*
- * __wt_checkpoint_list_return --
- *     Put back a chain taken from the checkpoint lists whose handles are still flagged as listed.
- */
-void
-__wt_checkpoint_list_return(WT_SESSION_IMPL *session, WT_DATA_HANDLE *chain)
-{
-    WT_DATA_HANDLE *last;
-
-    if (chain == NULL)
-        return;
-
-    for (last = chain; last->ckpt_list_next != NULL; last = last->ckpt_list_next)
-        ;
-    __checkpoint_list_push(session, chain, last);
-}
-
-/*
- * __wt_checkpoint_list_unflag --
- *     Clear the listed flag of a handle taken from the checkpoint lists. A writer that modifies the
- *     tree after this point adds the handle to a list again. The caller reads the tree's modified
- *     flag after the full barrier, and the writer reads the listed flag after setting the modified
- *     flag and a full barrier, so either the caller sees the tree modified or the writer adds it.
- */
-void
-__wt_checkpoint_list_unflag(WT_DATA_HANDLE *dhandle)
-{
-    __wt_atomic_store_uint8_relaxed(&dhandle->ckpt_listed, 0);
-    WT_FULL_BARRIER();
-}
-
-/*
- * __wt_checkpoint_list_keep --
- *     Return true if an open tree the gather has just visited may need work from a later
- *     checkpoint: the tree is modified, or in exclusive or special use, or has a clean checkpoint
- *     timer other than forever (zero after the tree went through the usual path, or a time to
- *     recheck its checkpoints). A clean tree with the timer set forever needs no visit until it is
- *     modified or reopened, and both add it to a list.
- */
-bool
-__wt_checkpoint_list_keep(WT_DATA_HANDLE *dhandle)
-{
-    WT_BTREE *btree;
-
-    if (F_ISSET(dhandle, WT_DHANDLE_EXCLUSIVE))
-        return (true);
-
-    btree = dhandle->handle;
-    if (F_ISSET(btree, WT_BTREE_SPECIAL_FLAGS))
-        return (true);
-    if (__checkpoint_list_ignores(btree))
-        return (false);
-    if (__wt_atomic_load_bool_acquire(&btree->modified))
-        return (true);
-    return (
-      __wt_atomic_load_uint64_relaxed(&btree->clean_ckpt_timer) != WT_BTREE_CLEAN_CKPT_FOREVER);
-}
-
-/*
- * __wt_checkpoint_list_clear --
- *     Stop adding handles to the checkpoint lists and release the handles in them. Called before
- *     the connection discards its data handles.
- */
-void
-__wt_checkpoint_list_clear(WT_SESSION_IMPL *session)
-{
-    WT_CONNECTION_IMPL *conn;
-    WT_DATA_HANDLE *dhandle, *next;
-
-    conn = S2C(session);
-
-    __wt_atomic_store_bool_release(&conn->ckpt.list_enabled, false);
-    conn->ckpt.list_complete = false;
-
-    for (dhandle = __wt_checkpoint_list_take(session); dhandle != NULL; dhandle = next) {
-        next = dhandle->ckpt_list_next;
-        __wt_atomic_store_uint8_relaxed(&dhandle->ckpt_listed, 0);
-        WT_DHANDLE_RELEASE(dhandle);
-    }
-}
-
-/*
- * __wt_checkpoint_tree_opened --
- *     A tree was opened: add its handle to a checkpoint list. An opened tree has a zero clean
- *     checkpoint timer, so the next checkpoint must visit it.
- */
-void
-__wt_checkpoint_tree_opened(WT_SESSION_IMPL *session, WT_BTREE *btree)
-{
-    if (!__checkpoint_list_ignores(btree))
-        __wt_checkpoint_list_add(session, btree->dhandle);
-}
-
-/*
- * __wt_checkpoint_tree_modified --
- *     A tree went from clean to modified: add its handle to a checkpoint list. The caller has set
- *     the tree's modified flag and issued a full barrier, see __wt_checkpoint_list_unflag.
- *
- *     If the running checkpoint has finished a list gather that did not visit the tree, the tree
- *     is not part of that checkpoint: update its checkpoint generation, as the full walk does for a
- *     clean tree it skips, so eviction in the tree is not bound by the checkpoint snapshot.
- */
-void
-__wt_checkpoint_tree_modified(WT_SESSION_IMPL *session, WT_BTREE *btree)
-{
-    uint64_t gen;
-
-    if (__checkpoint_list_ignores(btree))
-        return;
-
-    __wt_checkpoint_list_add(session, btree->dhandle);
-
-    gen = __wt_gen(session, WT_GEN_CHECKPOINT);
-    if (__wt_atomic_load_uint64_acquire(&S2C(session)->ckpt.gather_list_gen) == gen &&
-      __wt_atomic_load_uint64_relaxed(&btree->ckpt_gather_gen) != gen &&
-      __wt_atomic_load_uint64_acquire(&btree->checkpoint_gen) < gen)
-        __wt_checkpoint_update_generation(session, btree);
 }
 
 /*
@@ -652,6 +454,13 @@ __wt_checkpoint_get_handles(WT_SESSION_IMPL *session, const char *cfg[])
     btree = S2BT(session);
 
     /*
+     * The tree is locked: an exclusive reopen, which clears the btree structure, cannot run now. A
+     * tree that becomes modified after a gather from the pending stacks completes has its
+     * checkpoint generation raised unless this gather visited it.
+     */
+    __wt_atomic_store_uint64_relaxed(&btree->ckpt_gather_gen, __wt_gen(session, WT_GEN_CHECKPOINT));
+
+    /*
      * A disaggregated btree carries WT_BTREE_AWAITS_PUBLISH when it was created while a stable
      * schema epoch was set and is waiting to be published. Clear the flag if the btree is ready to
      * participate in this checkpoint; its pages are dirty (nothing was written while it awaited
@@ -661,7 +470,8 @@ __wt_checkpoint_get_handles(WT_SESSION_IMPL *session, const char *cfg[])
         WT_RET(__checkpoint_disagg_maybe_publish(session, btree));
 
     /* Skip the history store file as it is checkpointed manually later. */
-    if (__checkpoint_tree_not_gathered(btree) || F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH))
+    if (__wti_checkpoint_tree_not_gathered(btree) ||
+      F_ISSET_ATOMIC_32(btree, WT_BTREE_AWAITS_PUBLISH))
         return (0);
 
     if (__wt_conn_is_disagg(session)) {
@@ -1253,9 +1063,7 @@ __checkpoint_fail_reset(WT_SESSION_IMPL *session)
     WT_BTREE *btree;
 
     btree = S2BT(session);
-    btree->modified = true;
-    WT_FULL_BARRIER();
-    __wt_checkpoint_tree_modified(session, btree);
+    __wt_btree_modified_set(session, btree);
 
     /* Revert the in-memory root page accounting as we have failed during checkpointing. */
     __wt_block_disagg_checkpoint_rollback(session);
@@ -1542,27 +1350,11 @@ __checkpoint_prepare(WT_SESSION_IMPL *session, bool *trackingp, WT_CHECKPOINT_DB
     WT_ASSERT(session, session->ckpt.handle_next == 0);
     skip_func =
       ckpt_cfg->force || ckpt_cfg->named || ckpt_cfg->drop ? NULL : __checkpoint_gather_skip;
-
-    /*
-     * The checkpoint lists are not used on a disaggregated connection, in recovery or by the
-     * checkpoint at close. The metadata walk of a named or drop checkpoint does not keep them
-     * complete, so the next gather walks every handle. A forced checkpoint walks every handle and
-     * keeps the lists complete.
-     */
-    if (__wt_conn_is_disagg(session) || F_ISSET(conn, WT_CONN_RECOVERING) ||
-      F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING_CHECKPOINT) || ckpt_cfg->named || ckpt_cfg->drop)
-        conn->ckpt.list_complete = false;
-    else {
-        session->ckpt.list_update = true;
-        session->ckpt.list_gather = conn->ckpt.list_complete && !ckpt_cfg->force;
-    }
+    __wti_checkpoint_pending_mode_set(session, ckpt_cfg->force, ckpt_cfg->named || ckpt_cfg->drop);
     WT_WITH_TABLE_READ_LOCK(session,
       ret =
         __checkpoint_apply_operation(session, ckpt_cfg, __wt_checkpoint_get_handles, skip_func));
-    if (ret == 0 && session->ckpt.list_gather)
-        __wt_atomic_store_uint64_release(
-          &conn->ckpt.gather_list_gen, __wt_gen(session, WT_GEN_CHECKPOINT));
-    session->ckpt.list_update = session->ckpt.list_gather = false;
+    conn->ckpt.pending.mode = WTI_CKPT_GATHER_WALK;
 
     __wt_epoch(session, &conn->ckpt.prepare.timer_end);
     WT_STAT_CONN_SET(session, checkpoint_prep_running, 0);
@@ -2062,6 +1854,7 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
         return (ret);
     }
     if (ckpt_cfg.can_skip) {
+        __wti_checkpoint_pending_prune(session);
         WT_STAT_CONN_INCR(session, checkpoint_skipped);
         WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_INACTIVE);
         return (ret);
@@ -3626,9 +3419,7 @@ err:
      * If the checkpoint didn't complete successfully, make sure the tree is marked dirty.
      */
     if (ret != 0) {
-        btree->modified = true;
-        WT_FULL_BARRIER();
-        __wt_checkpoint_tree_modified(session, btree);
+        __wt_btree_modified_set(session, btree);
         conn->modified = true;
     }
 

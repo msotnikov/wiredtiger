@@ -1113,6 +1113,19 @@ __wt_page_only_modify_set(WT_SESSION_IMPL *session, WT_PAGE *page)
 }
 
 /*
+ * __wt_btree_modified_set --
+ *     Mark the tree modified and add it to the checkpoint pending stacks. The full barrier orders
+ *     the modified flag before the pending flag is read, see __wt_checkpoint_tree_modified.
+ */
+static WT_INLINE void
+__wt_btree_modified_set(WT_SESSION_IMPL *session, WT_BTREE *btree)
+{
+    btree->modified = true;
+    WT_FULL_BARRIER();
+    __wt_checkpoint_tree_modified(session, btree);
+}
+
+/*
  * __wt_tree_modify_set --
  *     Mark the tree dirty.
  */
@@ -1159,9 +1172,7 @@ __wt_tree_modify_set(WT_SESSION_IMPL *session)
                 !F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING_CHECKPOINT),
               "%s", "A btree is marked dirty during recovery or shutdown");
         }
-        btree->modified = true;
-        WT_FULL_BARRIER();
-        __wt_checkpoint_tree_modified(session, btree);
+        __wt_btree_modified_set(session, btree);
 
         /*
          * There is a potential race where checkpoint walks the tree and marks it as clean before a

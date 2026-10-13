@@ -57,6 +57,60 @@ struct __wti_ckpt_handle_stats {
 };
 
 /*
+ * WTI_CKPT_GATHER_MODE --
+ *     How the checkpoint handle gather finds the trees to visit.
+ */
+typedef enum {
+    /* Walk every open handle, the pending stacks are not used. */
+    WTI_CKPT_GATHER_WALK,
+    /* Walk every open handle and fill the pending stacks for the next checkpoint. */
+    WTI_CKPT_GATHER_WALK_FILL,
+    /* Visit only the handles taken from the pending stacks. */
+    WTI_CKPT_GATHER_PENDING
+} WTI_CKPT_GATHER_MODE;
+
+/*
+ * WTI_CKPT_PENDING_STACK --
+ *     A lock-free stack of data handles, linked through the handles. Handles are pushed one at a
+ *     time and the checkpoint takes the whole stack at once, so the stack has no ABA problem. Each
+ *     stack is on its own cache line.
+ */
+struct __wti_ckpt_pending_stack {
+    WT_CACHE_LINE_PAD_BEGIN
+    /* Last handle pushed, or NULL */
+    wt_shared WT_DATA_HANDLE *head;
+    WT_CACHE_LINE_PAD_END
+};
+
+/* Number of pending stacks, a power of two. A session pushes on stack (id & (count - 1)). */
+#define WTI_CKPT_PENDING_STACKS 16
+
+/*
+ * WTI_CKPT_PENDING --
+ *     Trees that may need work from the next checkpoint: trees modified or opened since the last
+ *     checkpoint, and trees the last checkpoint left work for. Fields other than the stacks, the
+ *     enabled flag and the gather generation belong to the checkpoint, which changes them under
+ *     the checkpoint lock.
+ */
+struct __wti_ckpt_pending {
+    WTI_CKPT_PENDING_STACK stack[WTI_CKPT_PENDING_STACKS];
+    /* Handles are pushed, set by a gather that walks and fills the stacks */
+    wt_shared bool enabled;
+    /* The stacks hold every tree the next gather must visit */
+    bool complete;
+    /* Gather mode of the running checkpoint */
+    WTI_CKPT_GATHER_MODE mode;
+    /* Handles a walking gather took from the stacks */
+    WT_DATA_HANDLE *chain;
+    /* Handles the running gather took from the stacks */
+    uint64_t taken;
+    /* Handles the running gather pushed back */
+    uint64_t kept;
+    /* Checkpoint generation whose gather visited only the pending handles and completed */
+    wt_shared uint64_t gather_gen;
+};
+
+/*
  * WTI_CKPT_PROGRESS --
  *     Checkpoint progress.
  */
@@ -98,12 +152,16 @@ struct __wti_ckpt_timer {
 
 /* DO NOT EDIT: automatically built by prototypes.py: BEGIN */
 
+extern bool __wti_checkpoint_tree_not_gathered(WT_BTREE *btree)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wti_checkpoint_parallel_commit(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wti_checkpoint_parallel_release_snapshot(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wti_checkpoint_parallel_rollback(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern void __wti_checkpoint_pending_mode_set(WT_SESSION_IMPL *session, bool force, bool meta_walk);
+extern void __wti_checkpoint_pending_prune(WT_SESSION_IMPL *session);
 
 #ifdef HAVE_UNITTEST
 

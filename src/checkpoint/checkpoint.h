@@ -49,6 +49,11 @@ struct __wt_ckpt_session {
     /* Named checkpoint drop list, during a checkpoint */
     WT_ITEM *drop_list;
 
+    /* The handle gather keeps the checkpoint lists complete, during a checkpoint */
+    bool list_update;
+    /* The handle gather visits only the handles in the checkpoint lists, during a checkpoint */
+    bool list_gather;
+
     /* Checkpoint time of current checkpoint, during a checkpoint */
     uint64_t current_sec;
 
@@ -58,6 +63,21 @@ struct __wt_ckpt_session {
      */
     int64_t ckpt_size_delta;
 };
+
+/*
+ * WT_CKPT_LIST --
+ *     A lock-free stack of data handles that may need work from the next checkpoint. Handles are
+ *     pushed one at a time and the checkpoint gather takes the whole stack at once, so the stack
+ *     has no ABA problem. Each stack is on its own cache line.
+ */
+struct __wt_ckpt_list {
+    WT_CACHE_LINE_PAD_BEGIN
+    wt_shared WT_DATA_HANDLE *head;
+    WT_CACHE_LINE_PAD_END
+};
+
+/* Number of checkpoint lists, a power of two: a session adds handles to list (id % count). */
+#define WT_CKPT_LISTS 16
 
 /*
  * WT_CKPT_CONNECTION --
@@ -88,6 +108,15 @@ struct __wt_ckpt_connection {
 
     /* Last checkpoint connection's base write generation. */
     uint64_t last_base_write_gen;
+
+    /* Trees that may need work from the next checkpoint */
+    WT_CKPT_LIST list[WT_CKPT_LISTS];
+    /* Handles are added to the checkpoint lists, set by the first full handle walk */
+    wt_shared bool list_enabled;
+    /* The checkpoint lists hold every tree the next checkpoint gather must visit */
+    bool list_complete;
+    /* Checkpoint generation whose handle gather visited only the listed handles and completed */
+    wt_shared uint64_t gather_list_gen;
 };
 
 /*
@@ -258,6 +287,10 @@ struct __wt_checkpoint_reconcile_threads {
 
 extern WT_CKPT_EVICTION_SNAP *__wt_ckpt_eviction_snap_current(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern WT_DATA_HANDLE *__wt_checkpoint_list_take(WT_SESSION_IMPL *session)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern bool __wt_checkpoint_list_keep(WT_DATA_HANDLE *dhandle)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern bool __wt_checkpoint_verbose_timer_started(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_checkpoint_close(WT_SESSION_IMPL *session, bool final)
@@ -288,6 +321,10 @@ extern void __wt_checkpoint_free(WT_SESSION_IMPL *session, WT_CKPT *ckpt);
 extern void __wt_checkpoint_handle_stats(
   WT_SESSION_IMPL *session, uint64_t gathering_handles_time_us);
 extern void __wt_checkpoint_handle_stats_clear(WT_SESSION_IMPL *session);
+extern void __wt_checkpoint_list_add(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle);
+extern void __wt_checkpoint_list_clear(WT_SESSION_IMPL *session);
+extern void __wt_checkpoint_list_return(WT_SESSION_IMPL *session, WT_DATA_HANDLE *chain);
+extern void __wt_checkpoint_list_unflag(WT_DATA_HANDLE *dhandle);
 extern void __wt_checkpoint_progress_stats(WT_SESSION_IMPL *session, uint64_t write_bytes);
 extern void __wt_checkpoint_rec_time_stats(
   WT_SESSION_IMPL *session, uint64_t reconcile_time_ticks, uint64_t sync_time_ticks);
@@ -296,6 +333,8 @@ extern void __wt_checkpoint_signal(WT_SESSION_IMPL *session, wt_off_t logsize);
 extern void __wt_checkpoint_snapshot_clear(WT_CKPT_SNAPSHOT *snapshot);
 extern void __wt_checkpoint_timer_stats(WT_SESSION_IMPL *session);
 extern void __wt_checkpoint_timer_stats_clear(WT_SESSION_IMPL *session);
+extern void __wt_checkpoint_tree_modified(WT_SESSION_IMPL *session, WT_BTREE *btree);
+extern void __wt_checkpoint_tree_opened(WT_SESSION_IMPL *session, WT_BTREE *btree);
 extern void __wt_checkpoint_tree_reconcile_update(WT_SESSION_IMPL *session, WT_TIME_AGGREGATE *ta);
 extern void __wt_checkpoint_update_generation(WT_SESSION_IMPL *session, WT_BTREE *btree);
 extern void __wt_ckptlist_free(WT_SESSION_IMPL *session, WT_CKPT **ckptbasep);

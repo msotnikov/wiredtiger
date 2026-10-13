@@ -178,6 +178,15 @@ struct __wt_data_handle {
      */
     WT_SPINLOCK close_lock; /* Lock to close the handle */
 
+    /*
+     * A tree that may need work from the next checkpoint is in one of the checkpoint lists. The
+     * handle is in at most one list at a time, and a list holds a reference to it.
+     */
+    /* Next handle in the same checkpoint list */
+    WT_DATA_HANDLE *ckpt_list_next;
+    /* Set while a checkpoint list holds the handle */
+    wt_shared uint8_t ckpt_listed;
+
     /* Data-source statistics */
     WT_DSRC_STATS *stats[WT_STAT_DSRC_COUNTER_SLOTS];
     WT_DSRC_STATS *stat_array;

@@ -116,6 +116,7 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
     WT_FULL_BARRIER();
 
     /* Close open data handles. */
+    __wt_checkpoint_list_clear(session);
     WT_TRET(__wti_conn_dhandle_discard(session));
 
     /* Shut down metadata tracking. */

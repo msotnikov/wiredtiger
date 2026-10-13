@@ -723,6 +723,9 @@ __wt_conn_dhandle_open(WT_SESSION_IMPL *session, const char *cfg[], uint32_t fla
     if (dhandle->checkpoint == NULL)
         __wt_atomic_add_uint32(&S2C(session)->open_btree_count, 1);
 
+    if (WT_DHANDLE_BTREE(dhandle) && dhandle->checkpoint == NULL)
+        __wt_checkpoint_tree_opened(session, btree);
+
     if (0) {
 err:
         if (btree != NULL)
@@ -791,6 +794,93 @@ __conn_btree_apply_internal(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle,
 }
 
 /*
+ * __conn_btree_apply_skip --
+ *     Return true if a handle walk without a URI skips the handle.
+ */
+static WT_INLINE bool
+__conn_btree_apply_skip(WT_DATA_HANDLE *dhandle)
+{
+    return (!F_ISSET(dhandle, WT_DHANDLE_OPEN) || F_ISSET(dhandle, WT_DHANDLE_DEAD) ||
+      __wt_atomic_load_bool_relaxed(&dhandle->outdated) || !WT_DHANDLE_BTREE(dhandle) ||
+      dhandle->checkpoint != NULL || WT_IS_ANY_METADATA(dhandle));
+}
+
+/*
+ * __conn_ckpt_list_release --
+ *     Release a handle taken from the checkpoint lists. Add it to a list again first if a later
+ *     checkpoint may need it. The caller has cleared the handle's listed flag.
+ */
+static void
+__conn_ckpt_list_release(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle)
+{
+    if (!__conn_btree_apply_skip(dhandle) && __wt_checkpoint_list_keep(dhandle))
+        __wt_checkpoint_list_add(session, dhandle);
+    WT_DHANDLE_RELEASE(dhandle);
+}
+
+/*
+ * __conn_ckpt_list_release_all --
+ *     Release every handle of a chain taken from the checkpoint lists.
+ */
+static void
+__conn_ckpt_list_release_all(WT_SESSION_IMPL *session, WT_DATA_HANDLE *chain)
+{
+    WT_DATA_HANDLE *dhandle, *next;
+
+    for (dhandle = chain; dhandle != NULL; dhandle = next) {
+        next = dhandle->ckpt_list_next;
+        __wt_checkpoint_list_unflag(dhandle);
+        __conn_ckpt_list_release(session, dhandle);
+    }
+}
+
+/*
+ * __conn_btree_apply_lists --
+ *     Checkpoint handle gather that visits only the handles taken from the checkpoint lists. A tree
+ *     is added to a list when it is opened and when it goes from clean to modified, and the gather
+ *     adds back every tree that may need a later checkpoint, so the lists hold every tree this
+ *     checkpoint must visit. The checkpoint transaction's snapshot is taken before the gather, and
+ *     a tree is added to a list before any of its updates commit, so every update the checkpoint
+ *     must include is in a tree taken here.
+ */
+static int
+__conn_btree_apply_lists(WT_SESSION_IMPL *session,
+  int (*file_func)(WT_SESSION_IMPL *, const char *[]),
+  int (*skip_func)(WT_SESSION_IMPL *, WT_DATA_HANDLE *, bool *), const char *cfg[],
+  uint64_t *walkedp)
+{
+    WT_DATA_HANDLE *dhandle, *next;
+    WT_DECL_RET;
+    uint64_t gen;
+
+    gen = __wt_gen(session, WT_GEN_CHECKPOINT);
+    *walkedp = 0;
+
+    /*
+     * The lists hold a reference to each handle, so the handles are not freed while the chain is
+     * walked. Handles later in the chain are still flagged as listed, writers don't add them again.
+     */
+    for (dhandle = __wt_checkpoint_list_take(session); dhandle != NULL; dhandle = next) {
+        next = dhandle->ckpt_list_next;
+        __wt_checkpoint_list_unflag(dhandle);
+
+        if (!__conn_btree_apply_skip(dhandle)) {
+            ++*walkedp;
+            __wt_atomic_store_uint64_relaxed(&((WT_BTREE *)dhandle->handle)->ckpt_gather_gen, gen);
+            ret = __conn_btree_apply_internal(session, dhandle, file_func, NULL, skip_func, cfg);
+            if (ret != 0) {
+                __wt_checkpoint_list_add(session, dhandle);
+                WT_DHANDLE_RELEASE(dhandle);
+                __wt_checkpoint_list_return(session, next);
+                return (ret);
+            }
+        }
+        __conn_ckpt_list_release(session, dhandle);
+    }
+    return (0);
+}
+
+/*
  * __wt_conn_btree_apply --
  *     Apply a function to all open btree handles with the given URI. The optional skip function is
  *     called before a handle is locked.
@@ -802,11 +892,14 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
   int (*skip_func)(WT_SESSION_IMPL *, WT_DATA_HANDLE *, bool *), const char *cfg[])
 {
     WT_CONNECTION_IMPL *conn;
-    WT_DATA_HANDLE *dhandle;
+    WT_DATA_HANDLE *chain, *dhandle;
     WT_DECL_RET;
-    uint64_t bucket, time_diff, time_start, time_stop;
+    uint64_t bucket, time_diff, time_start, time_stop, walked;
+    bool list_walk;
 
     conn = S2C(session);
+    chain = NULL;
+    list_walk = false;
     /*
      * If we're given a URI, then we walk only the hash list for that name. If we don't have a URI
      * we walk the entire dhandle list.
@@ -829,11 +922,37 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
         }
     } else {
         time_start = 0;
+        walked = conn->dhandle_count;
         if (WT_SESSION_IS_CHECKPOINT(session)) {
             time_start = __wt_clock(session);
             __wt_checkpoint_handle_stats_clear(session);
             F_SET_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
+            if (session->ckpt.list_gather) {
+                if ((ret = __conn_btree_apply_lists(
+                       session, file_func, skip_func, cfg, &walked)) != 0) {
+                    F_CLR_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
+                    return (ret);
+                }
+                goto done;
+            }
+            list_walk = session->ckpt.list_update;
         }
+
+        /*
+         * A full walk makes the checkpoint lists complete. Writers add trees once the lists are
+         * enabled, and the walk adds every tree it visits that may need a later checkpoint. The
+         * walk reads each tree after enabling the lists and a full barrier, and a writer reads the
+         * enabled flag after setting the tree's modified flag and a full barrier, so either the
+         * walk sees the tree modified or the writer adds it. The walk takes the handles already in
+         * the lists, so it does not leave their references held through checkpoints that do not
+         * use the lists.
+         */
+        if (list_walk) {
+            __wt_atomic_store_bool_release(&conn->ckpt.list_enabled, true);
+            WT_FULL_BARRIER();
+            chain = __wt_checkpoint_list_take(session);
+        }
+
         /*
          * Walk backwards. The sweep server walks this list forwards, write-locking each handle
          * across a close that can run long; if both walks went the same way at similar speeds, this
@@ -846,21 +965,26 @@ __wt_conn_btree_apply(WT_SESSION_IMPL *session, const char *uri,
             if (dhandle == NULL)
                 goto done;
 
-            if (!F_ISSET(dhandle, WT_DHANDLE_OPEN) || F_ISSET(dhandle, WT_DHANDLE_DEAD) ||
-              __wt_atomic_load_bool_relaxed(&dhandle->outdated) || !WT_DHANDLE_BTREE(dhandle) ||
-              dhandle->checkpoint != NULL || WT_IS_ANY_METADATA(dhandle))
+            if (__conn_btree_apply_skip(dhandle))
                 continue;
 
             WT_ERR(
               __conn_btree_apply_internal(session, dhandle, file_func, name_func, skip_func, cfg));
+
+            if (list_walk && __wt_checkpoint_list_keep(dhandle))
+                __wt_checkpoint_list_add(session, dhandle);
         }
 done:
+        if (list_walk) {
+            __conn_ckpt_list_release_all(session, chain);
+            conn->ckpt.list_complete = true;
+        }
         if (time_start != 0) {
             F_CLR_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
             time_stop = __wt_clock(session);
             time_diff = WT_CLOCKDIFF_US(time_stop, time_start);
             __wt_checkpoint_handle_stats(session, time_diff);
-            WT_STAT_CONN_SET(session, checkpoint_handle_walked, conn->dhandle_count);
+            WT_STAT_CONN_SET(session, checkpoint_handle_walked, walked);
         }
         return (0);
     }
@@ -868,6 +992,11 @@ done:
 err:
     F_CLR_ATOMIC_32(conn, WT_CONN_CKPT_GATHER);
     WT_DHANDLE_RELEASE(dhandle);
+    if (list_walk) {
+        /* The walk did not visit every handle, the next gather walks them all again. */
+        __conn_ckpt_list_release_all(session, chain);
+        conn->ckpt.list_complete = false;
+    }
     return (ret);
 }
 

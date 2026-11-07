@@ -353,6 +353,7 @@ __wt_txn_global_set_timestamp(WT_SESSION_IMPL *session, const char *cfg[])
 {
     WT_CONFIG_ITEM cval;
     WT_CONFIG_ITEM durable_cval, oldest_cval, stable_cval, step_down_cval, step_down_epoch_cval;
+    WT_SCHEMA_WAITER schema_waiter;
     WT_TXN_GLOBAL *txn_global;
     wt_timestamp_t durable_ts, oldest_ts, stable_disagg_epoch, stable_ts, step_down_epoch,
       step_down_ts;
@@ -620,7 +621,7 @@ set:
      * sets lock flags on the session, and the default session is shared between threads.
      */
     if (has_step_down)
-        __wt_writelock(session, &S2C(session)->schema_lock);
+        __wt_schema_writelock(session, &schema_waiter);
     __wt_writelock(session, &txn_global->rwlock);
     /*
      * This method can be called from multiple threads, check that we are moving the global
@@ -710,7 +711,7 @@ set:
 
     __wt_writeunlock(session, &txn_global->rwlock);
     if (has_step_down)
-        __wt_writeunlock(session, &S2C(session)->schema_lock);
+        __wt_schema_writeunlock(session, &schema_waiter);
 
     /*
      * Emit the verbose messages after releasing the lock: the event handler runs on this thread and

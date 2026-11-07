@@ -408,3 +408,145 @@ __wt_spin_trylock_track(WT_SESSION_IMPL *session, WT_SPINLOCK *t)
     }
     return (__wt_spin_trylock(session, t));
 }
+
+/*
+ * __wt_schema_write_wait_stat --
+ *     Add the time a writer waited in the schema lock queue to the schema lock wait statistics.
+ */
+static WT_INLINE void
+__wt_schema_write_wait_stat(WT_SESSION_IMPL *session, uint64_t time_start)
+{
+    WT_RWLOCK *l;
+    int64_t *session_stats, **stats, time_diff;
+
+    l = &S2C(session)->schema_lock;
+    time_diff = (int64_t)WT_CLOCKDIFF_US(__wt_clock(session), time_start);
+    stats = (int64_t **)S2C(session)->stats;
+    if (F_ISSET(session, WT_SESSION_INTERNAL))
+        __wt_atomic_add_int64_relaxed(
+          &stats[session->stat_conn_bucket][l->stat_int_usecs_off], time_diff);
+    else
+        __wt_atomic_add_int64_relaxed(
+          &stats[session->stat_conn_bucket][l->stat_app_usecs_off], time_diff);
+    session_stats = (int64_t *)&(session->stats);
+    if (l->stat_session_usecs_off != -1)
+        __wt_atomic_add_int64_relaxed(&session_stats[l->stat_session_usecs_off], time_diff);
+}
+
+/*
+ * __wt_schema_writelock --
+ *     Acquire the schema lock for write.
+ */
+static WT_INLINE void
+__wt_schema_writelock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_FUTEX_WORD wake_val;
+    WT_SCHEMA_WAITER *prev;
+    uint64_t time_start;
+    int pause_cnt;
+
+    conn = S2C(session);
+    waiter->next = NULL;
+    waiter->ready = 0;
+
+    /*
+     * Queue writers in arrival order before the rwlock. A rwlock unlock broadcasts to every thread
+     * waiting on its condition variable; with the queue, at most one writer waits on the rwlock and
+     * each handoff wakes only the next writer.
+     */
+    do
+        prev = __atomic_load_n(&conn->schema_write_tail, __ATOMIC_ACQUIRE);
+    while (!__atomic_compare_exchange_n(
+      &conn->schema_write_tail, &prev, waiter, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    if (prev != NULL) {
+        time_start = WT_STAT_ENABLED(session) ? __wt_clock(session) : 0;
+        __atomic_store_n(&prev->next, waiter, __ATOMIC_RELEASE);
+        for (pause_cnt = 0; __atomic_load_n(&waiter->ready, __ATOMIC_ACQUIRE) == 0; ++pause_cnt)
+            if (pause_cnt < 100)
+                WT_PAUSE();
+            else
+                WT_IGNORE_RET(__wt_futex_wait(&waiter->ready, 0, WT_MILLION, &wake_val));
+        if (time_start != 0)
+            __wt_schema_write_wait_stat(session, time_start);
+    }
+    __wt_writelock(session, &conn->schema_lock);
+}
+
+/*
+ * __wt_schema_queue_leave --
+ *     Remove a writer from the head of the schema lock queue and wake the next writer.
+ */
+static WT_INLINE void
+__wt_schema_queue_leave(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter)
+{
+    WT_SCHEMA_WAITER *expected, *next;
+
+    if ((next = __atomic_load_n(&waiter->next, __ATOMIC_ACQUIRE)) == NULL) {
+        expected = waiter;
+        if (__atomic_compare_exchange_n(&S2C(session)->schema_write_tail, &expected, NULL, false,
+              __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            return;
+        /* A writer swapped itself in as the tail and has not linked itself to this waiter yet. */
+        while ((next = __atomic_load_n(&waiter->next, __ATOMIC_ACQUIRE)) == NULL)
+            WT_PAUSE();
+    }
+    WT_IGNORE_RET(__wt_futex_wake(&next->ready, WT_FUTEX_WAKE_ONE, 1));
+}
+
+/*
+ * __wt_schema_try_writelock --
+ *     Try to acquire the schema lock for write, fail immediately if it is busy.
+ */
+static WT_INLINE int
+__wt_schema_try_writelock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_DECL_RET;
+    WT_SCHEMA_WAITER *expected;
+
+    conn = S2C(session);
+    waiter->next = NULL;
+    waiter->ready = 0;
+    expected = NULL;
+    if (!__atomic_compare_exchange_n(
+          &conn->schema_write_tail, &expected, waiter, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+        return (EBUSY);
+    if ((ret = __wt_try_writelock(session, &conn->schema_lock)) != 0)
+        __wt_schema_queue_leave(session, waiter);
+    return (ret);
+}
+
+/*
+ * __wt_schema_writeunlock --
+ *     Release the schema lock held for write.
+ */
+static WT_INLINE void
+__wt_schema_writeunlock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter)
+{
+    __wt_writeunlock(session, &S2C(session)->schema_lock);
+    __wt_schema_queue_leave(session, waiter);
+}
+
+/*
+ * __wt_schema_readlock --
+ *     Acquire the schema lock for read.
+ */
+static WT_INLINE void
+__wt_schema_readlock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter)
+{
+    WT_UNUSED(waiter);
+    __wt_readlock(session, &S2C(session)->schema_lock);
+}
+
+/*
+ * __wt_schema_readunlock --
+ *     Release the schema lock held for read.
+ */
+static WT_INLINE void
+__wt_schema_readunlock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter)
+{
+    WT_UNUSED(waiter);
+    __wt_readunlock(session, &S2C(session)->schema_lock);
+}

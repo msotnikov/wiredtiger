@@ -972,15 +972,16 @@ struct __wt_connection_impl {
 
     const char *cfg; /* Connection configuration */
 
-    WT_SPINLOCK api_lock;        /* Connection API spinlock */
-    WT_SPINLOCK checkpoint_lock; /* Checkpoint spinlock */
-    WT_SPINLOCK fh_lock;         /* File handle queue spinlock */
-    WT_SPINLOCK metadata_lock;   /* Metadata update spinlock */
-    WT_SPINLOCK reconfig_lock;   /* Single thread reconfigure */
-    WT_RWLOCK schema_lock;       /* Schema operation rwlock */
-    WT_RWLOCK table_lock;        /* Table list lock */
-    WT_SPINLOCK turtle_lock;     /* Turtle file spinlock */
-    WT_RWLOCK dhandle_lock;      /* Data handle list lock */
+    WT_SPINLOCK api_lock;                /* Connection API spinlock */
+    WT_SPINLOCK checkpoint_lock;         /* Checkpoint spinlock */
+    WT_SPINLOCK fh_lock;                 /* File handle queue spinlock */
+    WT_SPINLOCK metadata_lock;           /* Metadata update spinlock */
+    WT_SPINLOCK reconfig_lock;           /* Single thread reconfigure */
+    WT_RWLOCK schema_lock;               /* Schema operation rwlock */
+    WT_SCHEMA_WAITER *schema_write_tail; /* Schema lock writer queue */
+    WT_RWLOCK table_lock;                /* Table list lock */
+    WT_SPINLOCK turtle_lock;             /* Turtle file spinlock */
+    WT_RWLOCK dhandle_lock;              /* Data handle list lock */
 
     /* Connection queue */
     TAILQ_ENTRY(__wt_connection_impl) q;

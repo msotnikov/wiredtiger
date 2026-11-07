@@ -2367,6 +2367,8 @@ static WT_INLINE int __wt_row_leaf_key(WT_SESSION_IMPL *session, WT_PAGE *page, 
   WT_ITEM *key, bool instantiate) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 static WT_INLINE int __wt_row_leaf_key_instantiate(WT_SESSION_IMPL *session, WT_PAGE *page)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+static WT_INLINE int __wt_schema_try_writelock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 static WT_INLINE int __wt_snprintf(char *buf, size_t size, const char *fmt, ...)
   WT_GCC_FUNC_DECL_ATTRIBUTE((format(printf, 3, 4)))
     WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
@@ -2705,6 +2707,12 @@ static WT_INLINE void __wt_row_leaf_key_set(WT_PAGE *page, WT_ROW *rip, WT_CELL_
 static WT_INLINE void __wt_row_leaf_value_cell(
   WT_SESSION_IMPL *session, WT_PAGE *page, WT_ROW *rip, WT_CELL_UNPACK_KV *vpack);
 static WT_INLINE void __wt_row_leaf_value_set(WT_ROW *rip, WT_CELL_UNPACK_KV *unpack);
+static WT_INLINE void __wt_schema_queue_leave(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter);
+static WT_INLINE void __wt_schema_readlock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter);
+static WT_INLINE void __wt_schema_readunlock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter);
+static WT_INLINE void __wt_schema_write_wait_stat(WT_SESSION_IMPL *session, uint64_t time_start);
+static WT_INLINE void __wt_schema_writelock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter);
+static WT_INLINE void __wt_schema_writeunlock(WT_SESSION_IMPL *session, WT_SCHEMA_WAITER *waiter);
 static WT_INLINE void __wt_scr_free(WT_SESSION_IMPL *session, WT_ITEM **bufp);
 static WT_INLINE void __wt_seconds(WT_SESSION_IMPL *session, uint64_t *secondsp);
 static WT_INLINE void __wt_seconds32(WT_SESSION_IMPL *session, uint32_t *secondsp);

@@ -407,6 +407,8 @@ struct __wt_salvage_cookie;
 typedef struct __wt_salvage_cookie WT_SALVAGE_COOKIE;
 struct __wt_save_upd;
 typedef struct __wt_save_upd WT_SAVE_UPD;
+struct __wt_schema_waiter;
+typedef struct __wt_schema_waiter WT_SCHEMA_WAITER;
 struct __wt_scratch_track;
 typedef struct __wt_scratch_track WT_SCRATCH_TRACK;
 struct __wt_semaphore;
